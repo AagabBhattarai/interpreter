@@ -1,4 +1,4 @@
-// Hello friend
-(!=!)
-20.102
-11.
+fun thunder(a, b) {
+	c = a + b
+	return c * "Hello"
+}

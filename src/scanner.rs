@@ -49,6 +49,44 @@ pub enum TokenType {
     WHILE,
     EOF,
 }
+// impl From<&str> for TokenType {
+//     fn from(value: &str) -> Self {
+//         let keyword_offset = TokenType::AND;
+//         for (i, keyword) in KEYWORDS.iter().enumerate() {
+//             if keyword == value {
+//                 return (keyword_offset + i)
+//             }
+//         }
+//     }
+// }
+impl From<&str> for TokenType {
+    fn from(value: &str) -> Self {
+        match value {
+            "and" => TokenType::AND,
+            "class" => TokenType::CLASS,
+            "else" => TokenType::ELSE,
+            "false" => TokenType::FALSE,
+            "fun" => TokenType::FUN,
+            "for" => TokenType::FOR,
+            "if" => TokenType::IF,
+            "nil" => TokenType::NIL,
+            "or" => TokenType::OR,
+            "print" => TokenType::PRINT,
+            "return" => TokenType::RETURN,
+            "super" => TokenType::SUPER,
+            "this" => TokenType::THIS,
+            "true" => TokenType::TRUE,
+            "var" => TokenType::VAR,
+            "while" => TokenType::WHILE,
+            _ => TokenType::IDENTIFIER,  // Default to IDENTIFIER for unknown values
+        }
+    }
+}
+const KEYWORDS: [&str; 16] = [
+    "and", "class", "else", "false", "for", "fun", "if", "nil", "or", "print", "return", "super",
+    "this", "true", "var", "while",
+];
+
 #[derive(Debug)]
 enum Literal {
     Text(String),
@@ -223,6 +261,27 @@ impl Scanner {
                     ),
                 );
             }
+            b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
+                while self.peek().is_ascii_alphabetic()
+                    || self.peek().is_ascii_digit()
+                    || self.peek() == b'_'
+                {
+                    _ = self.read_char();
+                }
+
+                let lexume = std::str::from_utf8(
+                    &self.instruction_stream.as_bytes()
+                        [self.location.start_token..self.location.token_offset],
+                )
+                .unwrap_or("Can't convert bytes to str");
+
+                if KEYWORDS.contains(&lexume) {
+                    let token_type = TokenType::from(lexume);
+                    self.add_token(token_type, Literal::Text("null".to_string()));
+                    return
+                }
+                self.add_token(TokenType::IDENTIFIER, Literal::Text("null".to_string()));
+            }
             b' ' | b'\r' | b'\t' => (),
 
             b'\n' => self.get_to_next_line(),
@@ -321,7 +380,7 @@ impl Scanner {
     }
 }
 
-fn main() {
-    let a = Scanner::new("test.lox");
-    a.print_streams();
-}
+// fn main() {
+//     let a = Scanner::new("test.lox");
+//     a.print_streams();
+// }
