@@ -1,6 +1,7 @@
 use crate::error;
 use std::fs;
 use std::io::{self, Write};
+use std::thread::current;
 
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
@@ -140,6 +141,33 @@ impl Scanner {
             b'+' => self.add_token(TokenType::PLUS),
             b';' => self.add_token(TokenType::SEMICOLON),
             b'*' => self.add_token(TokenType::STAR),
+            b'=' => match self.expected_char(b'=') {
+                true => self.add_token(TokenType::EQUAL_EQUAL),
+                false => self.add_token(TokenType::EQUAL),
+            },
+            b'!' => match self.expected_char(b'=') {
+                true => self.add_token(TokenType::BANG_EQUAL),
+                false => self.add_token(TokenType::BANG),
+            },
+            b'<' => match self.expected_char(b'=') {
+                true => self.add_token(TokenType::LESS_EQUAL),
+                false => self.add_token(TokenType::LESS),
+            },
+            b'>' => match self.expected_char(b'=') {
+                true => self.add_token(TokenType::GREATER_EQUAL),
+                false => self.add_token(TokenType::GREATER),
+            },
+            b'/' => match self.expected_char(b'/') {
+                true => {
+                    while self.peek() != b'\n' && !self.is_at_stream_end() {
+                        _ = self.read_char();
+                    }
+                }
+                false => self.add_token(TokenType::SLASH),
+            },
+            b' ' | b'\r' | b'\t' => (),
+
+            b'\n' => self.get_to_next_line(),
             k => {
                 let a = format!(
                     "[line {0}] Error: Unexpected character: {1}",
@@ -151,7 +179,30 @@ impl Scanner {
             }
         }
     }
+    fn get_to_next_line(&mut self) {
+        self.location.line += 1;
+    }
+    fn peek(&self) -> u8 {
+        if self.is_at_stream_end() {
+            return b'\0';
+        }
+        let offset = self.location.token_offset;
+        let current_char = self.instruction_stream.as_bytes()[offset];
+        current_char
+    }
+    fn expected_char(&mut self, ec: u8) -> bool {
+        if self.is_at_stream_end() {
+            return false;
+        }
+        let offset = self.location.token_offset;
+        let current_char = self.instruction_stream.as_bytes()[offset];
+        if current_char != ec {
+            return false;
+        }
 
+        self.location.token_offset += 1;
+        true
+    }
     fn add_token(&mut self, t: TokenType) {
         let start = self.location.start_token;
         let eater_offset = self.location.token_offset;
@@ -191,7 +242,7 @@ impl Scanner {
         self.had_error
     }
     pub fn print_error_stream(&self) -> u8 {
-        let mut e_code:u8 = 0;
+        let mut e_code: u8 = 0;
         for error in self.error_stream.iter() {
             match error {
                 error::Errors::LexicalError(msg, code) => {
@@ -202,4 +253,9 @@ impl Scanner {
         }
         e_code
     }
+}
+
+fn main() {
+    let a = Scanner::new("test.lox");
+    a.print_streams();
 }
