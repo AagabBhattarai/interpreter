@@ -1,7 +1,6 @@
 use crate::error;
-use std::fs;
 use std::io::{self, Write};
-use std::thread::current;
+use std::{fmt, fs};
 
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
@@ -50,17 +49,37 @@ pub enum TokenType {
     WHILE,
     EOF,
 }
-
+#[derive(Debug)]
+enum Literal {
+    Text(String),
+    Number(f64),
+}
+impl fmt::Display for Literal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Literal::Text(t) => {
+                write!(f, "{}", t)
+            }
+            Literal::Number(n) => {
+                if n.fract().abs() < f64::EPSILON {
+                    write!(f, "{:.1}", n)
+                } else {
+                    write!(f, "{n}")
+                }
+            }
+        }
+    }
+}
 #[derive(Debug)]
 pub struct Token {
     token_type: TokenType,
     lexeme: String,
-    literal: String,
+    literal: Literal,
     line: usize,
 }
 
 impl Token {
-    fn new(token_type: TokenType, lexeme: String, literal: String, line: usize) -> Self {
+    fn new(token_type: TokenType, lexeme: String, literal: Literal, line: usize) -> Self {
         Token {
             token_type,
             lexeme,
@@ -122,7 +141,7 @@ impl Scanner {
         let eof_token = Token::new(
             TokenType::EOF,
             String::new(),
-            "null".to_string(),
+            Literal::Text("null".to_string()),
             self.location.line,
         );
         self.token_stream.push(eof_token);
@@ -131,31 +150,31 @@ impl Scanner {
     fn scan_token(&mut self) {
         let char = self.read_char();
         match char {
-            b'(' => self.add_token(TokenType::LEFT_PAREN),
-            b')' => self.add_token(TokenType::RIGHT_PAREN),
-            b'{' => self.add_token(TokenType::LEFT_BRACE),
-            b'}' => self.add_token(TokenType::RIGHT_BRACE),
-            b',' => self.add_token(TokenType::COMMA),
-            b'.' => self.add_token(TokenType::DOT),
-            b'-' => self.add_token(TokenType::MINUS),
-            b'+' => self.add_token(TokenType::PLUS),
-            b';' => self.add_token(TokenType::SEMICOLON),
-            b'*' => self.add_token(TokenType::STAR),
+            b'(' => self.add_token(TokenType::LEFT_PAREN, Literal::Text("null".to_string())),
+            b')' => self.add_token(TokenType::RIGHT_PAREN, Literal::Text("null".to_string())),
+            b'{' => self.add_token(TokenType::LEFT_BRACE, Literal::Text("null".to_string())),
+            b'}' => self.add_token(TokenType::RIGHT_BRACE, Literal::Text("null".to_string())),
+            b',' => self.add_token(TokenType::COMMA, Literal::Text("null".to_string())),
+            b'.' => self.add_token(TokenType::DOT, Literal::Text("null".to_string())),
+            b'-' => self.add_token(TokenType::MINUS, Literal::Text("null".to_string())),
+            b'+' => self.add_token(TokenType::PLUS, Literal::Text("null".to_string())),
+            b';' => self.add_token(TokenType::SEMICOLON, Literal::Text("null".to_string())),
+            b'*' => self.add_token(TokenType::STAR, Literal::Text("null".to_string())),
             b'=' => match self.expected_char(b'=') {
-                true => self.add_token(TokenType::EQUAL_EQUAL),
-                false => self.add_token(TokenType::EQUAL),
+                true => self.add_token(TokenType::EQUAL_EQUAL, Literal::Text("null".to_string())),
+                false => self.add_token(TokenType::EQUAL, Literal::Text("null".to_string())),
             },
             b'!' => match self.expected_char(b'=') {
-                true => self.add_token(TokenType::BANG_EQUAL),
-                false => self.add_token(TokenType::BANG),
+                true => self.add_token(TokenType::BANG_EQUAL, Literal::Text("null".to_string())),
+                false => self.add_token(TokenType::BANG, Literal::Text("null".to_string())),
             },
             b'<' => match self.expected_char(b'=') {
-                true => self.add_token(TokenType::LESS_EQUAL),
-                false => self.add_token(TokenType::LESS),
+                true => self.add_token(TokenType::LESS_EQUAL, Literal::Text("null".to_string())),
+                false => self.add_token(TokenType::LESS, Literal::Text("null".to_string())),
             },
             b'>' => match self.expected_char(b'=') {
-                true => self.add_token(TokenType::GREATER_EQUAL),
-                false => self.add_token(TokenType::GREATER),
+                true => self.add_token(TokenType::GREATER_EQUAL, Literal::Text("null".to_string())),
+                false => self.add_token(TokenType::GREATER, Literal::Text("null".to_string())),
             },
             b'/' => match self.expected_char(b'/') {
                 true => {
@@ -163,8 +182,47 @@ impl Scanner {
                         _ = self.read_char();
                     }
                 }
-                false => self.add_token(TokenType::SLASH),
+                false => self.add_token(TokenType::SLASH, Literal::Text("null".to_string())),
             },
+            b'"' => {
+                let mut literal = String::new();
+                while self.peek() != b'\n' && !self.is_at_stream_end() && self.peek() != b'"' {
+                    literal.push(self.read_char() as char);
+                }
+                if self.peek() != b'"' {
+                    let a = format!("[line {0}] Error: Unterminated string.", self.location.line,);
+                    self.error_stream.push(error::Errors::LexicalError(a, 65));
+                    self.had_error = true;
+                } else {
+                    _ = self.read_char();
+                    self.add_token(TokenType::STRING, Literal::Text(literal));
+                }
+            }
+            b'0'..=b'9' => {
+                while self.peek().is_ascii_digit() {
+                    _ = self.read_char();
+                }
+                if self.peek() == b'.' && self.peek_next().is_ascii_digit() {
+                    _ = self.read_char();
+                }
+                while self.peek().is_ascii_digit() {
+                    _ = self.read_char();
+                }
+
+                let lexume = std::str::from_utf8(
+                    &self.instruction_stream.as_bytes()
+                        [self.location.start_token..self.location.token_offset],
+                )
+                .unwrap_or("Can't convert bytes to str");
+                self.add_token(
+                    TokenType::NUMBER,
+                    Literal::Number(
+                        lexume
+                            .parse::<f64>()
+                            .expect("Can't convert str to floating-point"),
+                    ),
+                );
+            }
             b' ' | b'\r' | b'\t' => (),
 
             b'\n' => self.get_to_next_line(),
@@ -190,6 +248,14 @@ impl Scanner {
         let current_char = self.instruction_stream.as_bytes()[offset];
         current_char
     }
+    fn peek_next(&self) -> u8 {
+        if self.location.token_offset + 1 >= self.instruction_stream.len() {
+            return b'\0';
+        }
+        let offset = self.location.token_offset + 1;
+        let current_char = self.instruction_stream.as_bytes()[offset];
+        current_char
+    }
     fn expected_char(&mut self, ec: u8) -> bool {
         if self.is_at_stream_end() {
             return false;
@@ -203,7 +269,7 @@ impl Scanner {
         self.location.token_offset += 1;
         true
     }
-    fn add_token(&mut self, t: TokenType) {
+    fn add_token(&mut self, t: TokenType, literal: Literal) {
         let start = self.location.start_token;
         let eater_offset = self.location.token_offset;
         let line = self.location.line;
@@ -211,7 +277,7 @@ impl Scanner {
         let lexeme_ref = &self.instruction_stream.as_bytes()[start..eater_offset];
         let lexeme = std::str::from_utf8(lexeme_ref).unwrap().to_string();
 
-        let token = Token::new(t, lexeme, "null".to_string(), line);
+        let token = Token::new(t, lexeme, literal, line);
         self.token_stream.push(token);
     }
 
