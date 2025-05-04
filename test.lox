@@ -1,4 +1,7 @@
-fun thunder(a, b) {
-	c = a + b
-	return c * "Hello"
-}
+2 + 3
+// HELLO
+//fun thunder(a, b) {
+//	d = 100
+//	c = a + b
+//	return c * "Hello"
+//}

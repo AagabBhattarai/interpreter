@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use std::{fmt, fs};
 
 #[allow(non_camel_case_types)]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TokenType {
     // Single-character tokens.
     LEFT_PAREN,
@@ -49,16 +49,7 @@ pub enum TokenType {
     WHILE,
     EOF,
 }
-// impl From<&str> for TokenType {
-//     fn from(value: &str) -> Self {
-//         let keyword_offset = TokenType::AND;
-//         for (i, keyword) in KEYWORDS.iter().enumerate() {
-//             if keyword == value {
-//                 return (keyword_offset + i)
-//             }
-//         }
-//     }
-// }
+
 impl From<&str> for TokenType {
     fn from(value: &str) -> Self {
         match value {
@@ -78,7 +69,7 @@ impl From<&str> for TokenType {
             "true" => TokenType::TRUE,
             "var" => TokenType::VAR,
             "while" => TokenType::WHILE,
-            _ => TokenType::IDENTIFIER,  // Default to IDENTIFIER for unknown values
+            _ => TokenType::IDENTIFIER, // won't happen
         }
     }
 }
@@ -87,17 +78,15 @@ const KEYWORDS: [&str; 16] = [
     "this", "true", "var", "while",
 ];
 
-#[derive(Debug)]
-enum Literal {
+#[derive(Debug, Clone)]
+pub enum Literal {
     Text(String),
     Number(f64),
 }
 impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Literal::Text(t) => {
-                write!(f, "{}", t)
-            }
+            Literal::Text(t) => write!(f, "{}", t),
             Literal::Number(n) => {
                 if n.fract().abs() < f64::EPSILON {
                     write!(f, "{:.1}", n)
@@ -108,26 +97,33 @@ impl fmt::Display for Literal {
         }
     }
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Token {
-    token_type: TokenType,
+    pub token_type: TokenType,
     lexeme: String,
-    literal: Literal,
-    line: usize,
+    pub literal: Option<Literal>,
 }
-
 impl Token {
-    fn new(token_type: TokenType, lexeme: String, literal: Literal, line: usize) -> Self {
+    fn new(token_type: TokenType, lexeme: String, literal: Option<Literal>) -> Self {
         Token {
             token_type,
             lexeme,
             literal,
-            line,
         }
     }
-
-    fn print_info(&self) {
-        println!("{:?}", self);
+}
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{0:?} {1} {2}",
+            self.token_type,
+            self.lexeme,
+            match &self.literal {
+                Some(l) => l.to_string(),
+                None => "null".to_string(),
+            }
+        )
     }
 }
 
@@ -171,48 +167,44 @@ impl Scanner {
         }
     }
 
-    pub fn run_scan(&mut self) {
+    pub fn run_scan(&mut self) -> Vec<Token> {
         while !self.is_at_stream_end() {
             self.location.start_token = self.location.token_offset;
             self.scan_token();
         }
-        let eof_token = Token::new(
-            TokenType::EOF,
-            String::new(),
-            Literal::Text("null".to_string()),
-            self.location.line,
-        );
+        let eof_token = Token::new(TokenType::EOF, String::new(), None);
         self.token_stream.push(eof_token);
+        self.token_stream.clone()
     }
 
     fn scan_token(&mut self) {
         let char = self.read_char();
         match char {
-            b'(' => self.add_token(TokenType::LEFT_PAREN, Literal::Text("null".to_string())),
-            b')' => self.add_token(TokenType::RIGHT_PAREN, Literal::Text("null".to_string())),
-            b'{' => self.add_token(TokenType::LEFT_BRACE, Literal::Text("null".to_string())),
-            b'}' => self.add_token(TokenType::RIGHT_BRACE, Literal::Text("null".to_string())),
-            b',' => self.add_token(TokenType::COMMA, Literal::Text("null".to_string())),
-            b'.' => self.add_token(TokenType::DOT, Literal::Text("null".to_string())),
-            b'-' => self.add_token(TokenType::MINUS, Literal::Text("null".to_string())),
-            b'+' => self.add_token(TokenType::PLUS, Literal::Text("null".to_string())),
-            b';' => self.add_token(TokenType::SEMICOLON, Literal::Text("null".to_string())),
-            b'*' => self.add_token(TokenType::STAR, Literal::Text("null".to_string())),
+            b'(' => self.add_token(TokenType::LEFT_PAREN, None),
+            b')' => self.add_token(TokenType::RIGHT_PAREN, None),
+            b'{' => self.add_token(TokenType::LEFT_BRACE, None),
+            b'}' => self.add_token(TokenType::RIGHT_BRACE, None),
+            b',' => self.add_token(TokenType::COMMA, None),
+            b'.' => self.add_token(TokenType::DOT, None),
+            b'-' => self.add_token(TokenType::MINUS, None),
+            b'+' => self.add_token(TokenType::PLUS, None),
+            b';' => self.add_token(TokenType::SEMICOLON, None),
+            b'*' => self.add_token(TokenType::STAR, None),
             b'=' => match self.expected_char(b'=') {
-                true => self.add_token(TokenType::EQUAL_EQUAL, Literal::Text("null".to_string())),
-                false => self.add_token(TokenType::EQUAL, Literal::Text("null".to_string())),
+                true => self.add_token(TokenType::EQUAL_EQUAL, None),
+                false => self.add_token(TokenType::EQUAL, None),
             },
             b'!' => match self.expected_char(b'=') {
-                true => self.add_token(TokenType::BANG_EQUAL, Literal::Text("null".to_string())),
-                false => self.add_token(TokenType::BANG, Literal::Text("null".to_string())),
+                true => self.add_token(TokenType::BANG_EQUAL, None),
+                false => self.add_token(TokenType::BANG, None),
             },
             b'<' => match self.expected_char(b'=') {
-                true => self.add_token(TokenType::LESS_EQUAL, Literal::Text("null".to_string())),
-                false => self.add_token(TokenType::LESS, Literal::Text("null".to_string())),
+                true => self.add_token(TokenType::LESS_EQUAL, None),
+                false => self.add_token(TokenType::LESS, None),
             },
             b'>' => match self.expected_char(b'=') {
-                true => self.add_token(TokenType::GREATER_EQUAL, Literal::Text("null".to_string())),
-                false => self.add_token(TokenType::GREATER, Literal::Text("null".to_string())),
+                true => self.add_token(TokenType::GREATER_EQUAL, None),
+                false => self.add_token(TokenType::GREATER, None),
             },
             b'/' => match self.expected_char(b'/') {
                 true => {
@@ -220,7 +212,7 @@ impl Scanner {
                         _ = self.read_char();
                     }
                 }
-                false => self.add_token(TokenType::SLASH, Literal::Text("null".to_string())),
+                false => self.add_token(TokenType::SLASH, None),
             },
             b'"' => {
                 let mut literal = String::new();
@@ -233,7 +225,7 @@ impl Scanner {
                     self.had_error = true;
                 } else {
                     _ = self.read_char();
-                    self.add_token(TokenType::STRING, Literal::Text(literal));
+                    self.add_token(TokenType::STRING, Some(Literal::Text(literal)));
                 }
             }
             b'0'..=b'9' => {
@@ -254,11 +246,11 @@ impl Scanner {
                 .unwrap_or("Can't convert bytes to str");
                 self.add_token(
                     TokenType::NUMBER,
-                    Literal::Number(
+                    Some(Literal::Number(
                         lexume
                             .parse::<f64>()
                             .expect("Can't convert str to floating-point"),
-                    ),
+                    )),
                 );
             }
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
@@ -277,10 +269,10 @@ impl Scanner {
 
                 if KEYWORDS.contains(&lexume) {
                     let token_type = TokenType::from(lexume);
-                    self.add_token(token_type, Literal::Text("null".to_string()));
-                    return
+                    self.add_token(token_type, None);
+                    return;
                 }
-                self.add_token(TokenType::IDENTIFIER, Literal::Text("null".to_string()));
+                self.add_token(TokenType::IDENTIFIER, None);
             }
             b' ' | b'\r' | b'\t' => (),
 
@@ -308,12 +300,11 @@ impl Scanner {
         current_char
     }
     fn peek_next(&self) -> u8 {
-        if self.location.token_offset + 1 >= self.instruction_stream.len() {
-            return b'\0';
-        }
-        let offset = self.location.token_offset + 1;
-        let current_char = self.instruction_stream.as_bytes()[offset];
-        current_char
+        self.instruction_stream
+            .as_bytes()
+            .get(self.location.token_offset + 1)
+            .copied()
+            .unwrap_or(b'\0')
     }
     fn expected_char(&mut self, ec: u8) -> bool {
         if self.is_at_stream_end() {
@@ -328,15 +319,14 @@ impl Scanner {
         self.location.token_offset += 1;
         true
     }
-    fn add_token(&mut self, t: TokenType, literal: Literal) {
+    fn add_token(&mut self, t: TokenType, literal: Option<Literal>) {
         let start = self.location.start_token;
         let eater_offset = self.location.token_offset;
-        let line = self.location.line;
 
         let lexeme_ref = &self.instruction_stream.as_bytes()[start..eater_offset];
         let lexeme = std::str::from_utf8(lexeme_ref).unwrap().to_string();
 
-        let token = Token::new(t, lexeme, literal, line);
+        let token = Token::new(t, lexeme, literal);
         self.token_stream.push(token);
     }
 
@@ -351,16 +341,13 @@ impl Scanner {
         self.location.token_offset >= self.instruction_stream.len()
     }
 
-    fn print_streams(&self) {
-        println!("Instruction Stream:\n {}", self.instruction_stream)
-    }
+    // fn print_streams(&self) {
+    //     println!("Instruction Stream:\n {}", self.instruction_stream)
+    // }
 
     pub fn print_token(&self) {
         for token in self.token_stream.iter() {
-            println!(
-                "{0:?} {1} {2}",
-                token.token_type, token.lexeme, token.literal
-            );
+            println!("{}", token);
         }
     }
     pub fn had_error(&self) -> bool {
