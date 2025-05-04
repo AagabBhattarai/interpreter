@@ -366,8 +366,3 @@ impl Scanner {
         e_code
     }
 }
-
-// fn main() {
-//     let a = Scanner::new("test.lox");
-//     a.print_streams();
-// }
