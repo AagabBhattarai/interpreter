@@ -100,15 +100,17 @@ impl fmt::Display for Literal {
 #[derive(Clone, Debug)]
 pub struct Token {
     pub token_type: TokenType,
-    lexeme: String,
+    pub lexeme: String,
     pub literal: Option<Literal>,
+    pub line: usize,
 }
 impl Token {
-    fn new(token_type: TokenType, lexeme: String, literal: Option<Literal>) -> Self {
+    fn new(token_type: TokenType, lexeme: String, literal: Option<Literal>, line: usize) -> Self {
         Token {
             token_type,
             lexeme,
             literal,
+            line,
         }
     }
 }
@@ -172,7 +174,7 @@ impl Scanner {
             self.location.start_token = self.location.token_offset;
             self.scan_token();
         }
-        let eof_token = Token::new(TokenType::EOF, String::new(), None);
+        let eof_token = Token::new(TokenType::EOF, String::new(), None, self.location.line);
         self.token_stream.push(eof_token);
         self.token_stream.clone()
     }
@@ -326,7 +328,7 @@ impl Scanner {
         let lexeme_ref = &self.instruction_stream.as_bytes()[start..eater_offset];
         let lexeme = std::str::from_utf8(lexeme_ref).unwrap().to_string();
 
-        let token = Token::new(t, lexeme, literal);
+        let token = Token::new(t, lexeme, literal, self.location.line);
         self.token_stream.push(token);
     }
 
@@ -341,18 +343,12 @@ impl Scanner {
         self.location.token_offset >= self.instruction_stream.len()
     }
 
-    // fn print_streams(&self) {
-    //     println!("Instruction Stream:\n {}", self.instruction_stream)
-    // }
-
     pub fn print_token(&self) {
         for token in self.token_stream.iter() {
             println!("{}", token);
         }
     }
-    pub fn had_error(&self) -> bool {
-        self.had_error
-    }
+
     pub fn print_error_stream(&self) -> u8 {
         let mut e_code: u8 = 0;
         for error in self.error_stream.iter() {
