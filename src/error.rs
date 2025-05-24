@@ -11,3 +11,14 @@ impl ParseError {
         ParseError::InvalidToken(msg, exit_code)
     }
 }
+
+#[derive(Debug)]
+pub enum EvalError {
+    CastError(String, u8),
+}
+impl EvalError {
+    pub fn cast_error(msg: String) -> EvalError {
+        let exit_code: u8 = 70;
+        EvalError::CastError(msg, exit_code)
+    }
+}

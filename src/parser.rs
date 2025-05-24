@@ -1,7 +1,8 @@
 use crate::error::ParseError;
 use crate::scanner::{Literal, Token, TokenType};
 
-enum Leaf {
+#[derive(Debug)]
+pub enum Leaf {
     Text(String),
     Number(f64),
     Boolean(bool),
@@ -32,6 +33,7 @@ impl From<Literal> for Leaf {
         }
     }
 }
+#[derive(Debug)]
 pub enum UnaryOp {
     Not,
     Negation,
@@ -53,7 +55,8 @@ impl From<TokenType> for UnaryOp {
         }
     }
 }
-enum BinaryOp {
+#[derive(Debug)]
+pub enum BinaryOp {
     Divide,
     Multiply,
     Add,
@@ -100,6 +103,7 @@ impl From<TokenType> for BinaryOp {
     }
 }
 
+#[derive(Debug)]
 pub enum Expr {
     Leaf(Leaf), // literal values
     Grouping(Box<Expr>),
