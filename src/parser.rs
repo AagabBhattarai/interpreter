@@ -6,6 +6,7 @@ pub enum Leaf {
     Text(String),
     Number(f64),
     Boolean(bool),
+    Identifier(String),
     Nil,
 }
 impl std::fmt::Display for Leaf {
@@ -21,6 +22,7 @@ impl std::fmt::Display for Leaf {
                     write!(f, "{n}")
                 }
             }
+            Leaf::Identifier(i) => write!(f, "{i}"),
         }
     }
 }
@@ -123,6 +125,22 @@ impl std::fmt::Display for Expr {
     }
 }
 
+pub enum Statement {
+    Expression {
+        expr: Expr,
+        line: usize,
+    },
+    Print {
+        expr: Expr,
+        line: usize,
+    },
+    Var {
+        name: String,
+        expr: Expr,
+        line: usize,
+    },
+}
+
 pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
@@ -131,9 +149,52 @@ impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Self { tokens, current: 0 }
     }
-    pub fn parse(&mut self) -> Result<Expr, ParseError> {
-        self.expression()
+    pub fn parse_program(&mut self) -> Result<Vec<Statement>, ParseError> {
+        let mut statements = Vec::new();
+        while !self.at_end_of_stream() {
+            statements.push(self.declarations()?);
+        }
+        Ok(statements)
     }
+    pub fn declarations(&mut self) -> Result<Statement, ParseError> {
+        let line = self.get_line_number();
+        if self.is_expected_token(TokenType::VAR) {
+            return Ok(self.var_statement(line)?);
+        }
+
+        Ok(self.statement(line)?)
+    }
+    fn var_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
+        let name = self.consume(TokenType::IDENTIFIER, "Expected variable name")?;
+
+        let expr = if self.is_expected_token(TokenType::EQUAL) {
+            self.expression()?
+        } else {
+            Expr::Leaf(Leaf::Nil)
+        };
+        self.check_end_of_statement(line)?;
+        return Ok(Statement::Var { name, expr, line });
+    }
+
+    fn statement(&mut self, line: usize) -> Result<Statement, ParseError> {
+        if self.is_expected_token(TokenType::PRINT) {
+            return Ok(self.print_statement(line)?);
+        }
+        Ok(self.expression_statement(line)?)
+    }
+
+    fn print_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
+        let expr = self.expression()?;
+        self.check_end_of_statement(line)?;
+        Ok(Statement::Print { expr, line })
+    }
+
+    fn expression_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
+        let expr = self.expression()?;
+        self.check_end_of_statement(line)?;
+        Ok(Statement::Expression { expr, line })
+    }
+
     fn expression(&mut self) -> Result<Expr, ParseError> {
         self.equality()
     }
@@ -190,7 +251,7 @@ impl Parser {
             self.primary()
         }
     }
-    //This is so bad design
+    //This is such a bad design
     fn primary(&mut self) -> Result<Expr, ParseError> {
         if self.is_expected_token(TokenType::TRUE) {
             return Ok(Expr::Leaf(Leaf::Boolean(true)));
@@ -205,9 +266,10 @@ impl Parser {
             return Ok(Expr::Leaf(Leaf::from(leaf_literal)));
         } else if self.is_expected_token(TokenType::LEFT_PAREN) {
             let expr = Box::new(self.expression()?);
-            let _ = self.is_expected_token(TokenType::RIGHT_PAREN);
-
+            self.consume(TokenType::RIGHT_PAREN, "Expected ')' after expression")?;
             return Ok(Expr::Grouping(expr));
+        } else if self.is_expected_token(TokenType::IDENTIFIER) {
+            return Ok(Expr::Leaf(Leaf::Identifier(self.get_lexeme())));
         } else {
             if self.at_end_of_stream() {
                 let error_msg = format!("Error: Reached the end of the file.");
@@ -249,5 +311,36 @@ impl Parser {
             .literal
             .take()
             .expect("Literals exist only for Number and String") //idk but wrapping literal inside option and taking the value is better than cloning ?
+    }
+    fn get_line_number(&self) -> usize {
+        self.tokens[self.current].line
+    }
+    pub fn parse(&mut self) -> Result<Expr, ParseError> {
+        self.expression()
+    }
+    fn check_end_of_statement(&mut self, line: usize) -> Result<(), ParseError> {
+        if !self.is_expected_token(TokenType::SEMICOLON) {
+            let error_msg = format!("[line {}]: Expected ';' at end of the statement", line);
+            return Err(ParseError::expected_token(error_msg));
+        }
+        let _ = self.is_expected_token(TokenType::SEMICOLON);
+        Ok(())
+    }
+    /// Get lexeme for the token that was consumed.
+    fn get_lexeme(&self) -> String {
+        let index = self.current - 1;
+        self.tokens[index].lexeme.clone()
+    }
+
+    fn consume(&mut self, required_token: TokenType, msg: &str) -> Result<String, ParseError> {
+        let token = self.get_token_info();
+        let line = token.line;
+        let value = token.lexeme;
+        if self.is_expected_token(required_token) {
+            Ok(value)
+        } else {
+            let error_msg = format!("Line [{}]: {}", line, msg);
+            Err(ParseError::invalid_token(error_msg))
+        }
     }
 }

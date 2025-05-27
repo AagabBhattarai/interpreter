@@ -122,7 +122,7 @@ impl fmt::Display for Token {
             self.token_type,
             self.lexeme,
             match &self.literal {
-                Some(l) => l.to_string(),
+                Some(l) => l.clone().to_string(),
                 None => "null".to_string(),
             }
         )
@@ -217,10 +217,12 @@ impl Scanner {
                 false => self.add_token(TokenType::SLASH, None),
             },
             b'"' => {
-                let mut literal = String::new();
-                while self.peek() != b'\n' && !self.is_at_stream_end() && self.peek() != b'"' {
-                    literal.push(self.read_char() as char);
+                let mut literal: Vec<u8> = Vec::new();
+                // while self.peek() != b'\n' && !self.is_at_stream_end() && self.peek() != b'"' {
+                while !self.is_at_stream_end() && self.peek() != b'"' {
+                    literal.push(self.read_char());
                 }
+                let literal = std::str::from_utf8(&literal).unwrap().to_string();
                 if self.peek() != b'"' {
                     let a = format!("[line {0}] Error: Unterminated string.", self.location.line,);
                     self.error_stream.push(error::Errors::LexicalError(a, 65));

@@ -3,9 +3,9 @@ mod evaluate;
 mod parser;
 mod scanner;
 
-use error::ParseError;
+use error::{EvalError, ParseError};
 use evaluate::Evaluator;
-use parser::{Expr, Parser};
+use parser::{Expr, Parser, Statement};
 use scanner::Scanner;
 
 use std::env;
@@ -42,12 +42,39 @@ fn main() -> ExitCode {
         "evaluate" => match scan_and_parse(filename) {
             Ok(ast) => {
                 let evaluator = Evaluator::new();
-                let value = evaluator.evaluate(&ast);
+                let value = evaluator.evaluate_expr(&ast);
                 match value {
                     Ok(v) => println!("{}", v),
-                    Err(e) => eprintln!("{:?}", e),
+                    Err(EvalError::OperandError(msg, code)) => {
+                        eprintln!("{}", msg);
+                        return ExitCode::from(code);
+                    }
+                    Err(EvalError::UndefinedVariable(msg, code)) => {
+                        eprintln!("{}", msg);
+                        return ExitCode::from(code);
+                    }
                 }
                 return ExitCode::from(0);
+            }
+            Err((msg, code)) => {
+                eprintln!("{msg}");
+                return ExitCode::from(code);
+            }
+        },
+        "run" => match scan_and_parse_statements(filename) {
+            Ok(statements) => {
+                let mut evaluator = Evaluator::new();
+                match evaluator.evaluate(statements) {
+                    Ok(_) => return ExitCode::from(0),
+                    Err(EvalError::OperandError(msg, code)) => {
+                        eprintln!("{}", msg);
+                        return ExitCode::from(code);
+                    }
+                    Err(EvalError::UndefinedVariable(msg, code)) => {
+                        eprintln!("{}", msg);
+                        return ExitCode::from(code);
+                    }
+                }
             }
             Err((msg, code)) => {
                 eprintln!("{msg}");
@@ -61,6 +88,23 @@ fn main() -> ExitCode {
     }
 }
 
+fn scan_and_parse_statements(filename: &String) -> Result<Vec<Statement>, (String, u8)> {
+    let mut scanner = Scanner::new(&filename);
+    let token_stream = scanner.run_scan();
+    let mut parser = Parser::new(token_stream);
+    match parser.parse_program() {
+        Ok(statements) => return Ok(statements),
+        Err(e) => match e {
+            ParseError::InvalidToken(msg, code) => {
+                return Err((msg, code));
+            }
+            ParseError::ExpectedToken(msg, code) => {
+                return Err((msg, code));
+            }
+        },
+    }
+}
+
 fn scan_and_parse(filename: &String) -> Result<Expr, (String, u8)> {
     let mut scanner = Scanner::new(&filename);
     let token_stream = scanner.run_scan();
@@ -69,6 +113,9 @@ fn scan_and_parse(filename: &String) -> Result<Expr, (String, u8)> {
         Ok(ast) => return Ok(ast),
         Err(e) => match e {
             ParseError::InvalidToken(msg, code) => {
+                return Err((msg, code));
+            }
+            ParseError::ExpectedToken(msg, code) => {
                 return Err((msg, code));
             }
         },
