@@ -46,7 +46,7 @@ impl From<&Leaf> for Value {
             Leaf::Number(n) => Value::Num(*n),
             Leaf::Boolean(b) => Value::Boolean(*b),
             Leaf::Nil => Value::Nil,
-            Leaf::Identifier(s) => {
+            Leaf::Identifier(_) => {
                 panic!("Identifier condition should be dealth prior to this")
             }
         }
@@ -66,62 +66,93 @@ impl std::fmt::Display for Value {
     }
 }
 pub struct Evaluator {
-    symbol_table: HashMap<String, Value>,
+    environment: Vec<HashMap<String, Value>>,
 }
 
 impl Evaluator {
     pub fn new() -> Self {
         Self {
-            symbol_table: HashMap::new(),
+            environment: vec![HashMap::new()],
         }
     }
 
+    fn current_environment(&mut self) -> &mut HashMap<String, Value> {
+        self.environment.last_mut().unwrap()
+    }
+
+    fn insert_to_env(&mut self, name: String, value: Value) {
+        self.current_environment().insert(name, value);
+    }
+
+    fn get_env(&self, name: &str) -> Option<&Value> {
+        for env in self.environment.iter().rev() {
+            if let Some(value) = env.get(name) {
+                return Some(value);
+            }
+        }
+        None
+    }
+    fn add_env(&mut self, new_env: HashMap<String, Value>) {
+        self.environment.push(new_env);
+    }
+    fn remove_env(&mut self) {
+        self.environment.pop();
+    }
     pub fn evaluate(&mut self, statements: Vec<Statement>) -> Result<(), EvalError> {
         for statement in statements {
             match statement {
                 Statement::Expression { expr, line } => {
-                    self.evaluate_expr(&expr)?;
+                    self.evaluate_expr(&expr, line)?;
                 }
                 Statement::Print { expr, line } => {
-                    let value: Value = self.evaluate_expr(&expr)?;
+                    let value: Value = self.evaluate_expr(&expr, line)?;
                     println!("{}", value);
                 }
                 Statement::Var { name, expr, line } => {
-                    let value = self.evaluate_expr(&expr).map_err(|e| {
+                    let value = self.evaluate_expr(&expr, line).map_err(|e| {
                         EvalError::undefined_variable(format!("{} {}", add_line(line), e))
                     })?; // So, I immediately evaluate the expression and assign it to the symbol table
-                    self.symbol_table.insert(name, value);
+                    self.insert_to_env(name, value);
+                } // _ => todo!(),
+                Statement::Block(statements) => {
+                    let new_environment: HashMap<String, Value> = HashMap::new();
+                    self.add_env(new_environment);
+                    self.evaluate(statements)?;
+                    self.remove_env();
                 }
-                _ => todo!(),
             }
         }
         Ok(())
     }
-    pub fn evaluate_expr(&self, expr: &Expr) -> Result<Value, EvalError> {
+    pub fn evaluate_expr(&mut self, expr: &Expr, line: usize) -> Result<Value, EvalError> {
         // println!("{:?}", expr);
         match expr {
+            Expr::Assignment(identifier, value) => {
+                let value = self.evaluate_expr(value.as_ref(), line)?;
+                self.assign(identifier, value, line)
+            }
             Expr::Leaf(Leaf::Identifier(s)) => {
-                let value = self.symbol_table.get(s);
+                let value = self.get_env(s);
                 match value {
                     Some(v) => return Ok(v.clone()),
                     None => {
-                        let msg = format!("Undefined variable {}", s);
+                        let msg = format!("[Line {}]: Undefined variable {}", line, s);
                         return Err(EvalError::undefined_variable(msg));
                     }
                 }
             }
             Expr::Leaf(l) => return Ok(Value::from(l)),
-            Expr::Grouping(b) => return self.evaluate_expr(b.as_ref()),
+            Expr::Grouping(b) => return self.evaluate_expr(b.as_ref(), line),
             Expr::Unary(operator, operand) => {
-                let sub_expr_value = self.evaluate_expr(operand.as_ref())?;
+                let sub_expr_value = self.evaluate_expr(operand.as_ref(), line)?;
                 match operator {
                     UnaryOp::Negation => return Ok(Value::Num(-sub_expr_value.as_f64()?)),
                     UnaryOp::Not => return Ok(Value::Boolean(!self.is_truthy(&sub_expr_value))),
                 }
             }
             Expr::Binary(left, operator, right) => {
-                let left = self.evaluate_expr(left.as_ref())?;
-                let right = self.evaluate_expr(right.as_ref())?;
+                let left = self.evaluate_expr(left.as_ref(), line)?;
+                let right = self.evaluate_expr(right.as_ref(), line)?;
 
                 match operator {
                     BinaryOp::Add => match (left, right) {
@@ -130,9 +161,9 @@ impl Evaluator {
                         }
                         (Value::Num(l), Value::Num(r)) => return Ok(Value::Num(l + r)),
                         _ => {
-                            return Err(EvalError::operand_error(
-                                "Operands must be a number\n".to_string(),
-                            ))
+                            let msg =
+                                format!("[Line {}]: Operands must be a number or strings\n", line);
+                            return Err(EvalError::operand_error(msg));
                         }
                     },
                     BinaryOp::Multiply => return Ok(Value::Num(left.as_f64()? * right.as_f64()?)),
@@ -166,5 +197,22 @@ impl Evaluator {
             Value::Boolean(b) => *b,
             _ => true,
         }
+    }
+    fn get_env_mut(&mut self, name: &str) -> Option<&mut Value> {
+        for env in self.environment.iter_mut().rev() {
+            if let Some(value) = env.get_mut(name) {
+                return Some(value);
+            }
+        }
+        None
+    }
+    fn assign(&mut self, key: &str, value: Value, line: usize) -> Result<Value, EvalError> {
+        let Some(k) = self.get_env_mut(key) else {
+            let msg = format!("[Line {}]: Undefined variable '{}' used", line, key);
+            return Err(EvalError::undefined_variable(msg));
+        };
+
+        *k = value.clone();
+        Ok(value)
     }
 }

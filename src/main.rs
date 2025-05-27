@@ -41,8 +41,8 @@ fn main() -> ExitCode {
         },
         "evaluate" => match scan_and_parse(filename) {
             Ok(ast) => {
-                let evaluator = Evaluator::new();
-                let value = evaluator.evaluate_expr(&ast);
+                let mut evaluator = Evaluator::new();
+                let value = evaluator.evaluate_expr(&ast, 0);
                 match value {
                     Ok(v) => println!("{}", v),
                     Err(EvalError::OperandError(msg, code)) => {

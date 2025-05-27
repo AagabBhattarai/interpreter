@@ -111,6 +111,7 @@ pub enum Expr {
     Grouping(Box<Expr>),
     Unary(UnaryOp, Box<Expr>),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
+    Assignment(String, Box<Expr>),
 }
 
 impl std::fmt::Display for Expr {
@@ -120,7 +121,7 @@ impl std::fmt::Display for Expr {
             Expr::Grouping(e) => write!(f, "(group {})", *e),
             Expr::Unary(op, right) => write!(f, "({} {})", op, *right),
             Expr::Binary(left, op, right) => write!(f, "({1} {0} {2})", left, op, right),
-            // _ => todo!(),
+            Expr::Assignment(l, r) => write!(f, "(= {} {})", l, r), // _ => todo!(),
         }
     }
 }
@@ -139,6 +140,7 @@ pub enum Statement {
         expr: Expr,
         line: usize,
     },
+    Block(Vec<Statement>),
 }
 
 pub struct Parser {
@@ -180,9 +182,22 @@ impl Parser {
         if self.is_expected_token(TokenType::PRINT) {
             return Ok(self.print_statement(line)?);
         }
+        if self.is_expected_token(TokenType::LEFT_BRACE) {
+            return Ok(self.block_statement(line)?);
+        }
         Ok(self.expression_statement(line)?)
     }
+    fn block_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
+        let mut statements = Vec::new();
+        while !self.check(TokenType::RIGHT_BRACE) && !self.at_end_of_stream() {
+            statements.push(self.declarations()?);
+        }
 
+        // let line = self.get_line_number(); // idk which line should be reported
+        let error_msg = format!("[Line {}]: Expected '}}' for the block", line);
+        self.consume(TokenType::RIGHT_BRACE, &error_msg)?;
+        Ok(Statement::Block(statements))
+    }
     fn print_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
         let expr = self.expression()?;
         self.check_end_of_statement(line)?;
@@ -196,7 +211,26 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expr, ParseError> {
-        self.equality()
+        self.assignment()
+    }
+
+    fn assignment(&mut self) -> Result<Expr, ParseError> {
+        let expr = self.equality()?;
+
+        if self.is_expected_token(TokenType::EQUAL) {
+            let value = self.assignment()?;
+
+            // I can't evaluate it yet, but i have a inkling that placing identifier at leaf will require refactor # FOR NOW LET'S move forward.
+            if let Expr::Leaf(Leaf::Identifier(lvalue)) = expr {
+                return Ok(Expr::Assignment(lvalue, Box::new(value)));
+            } else {
+                // Again error reporting mechanism isn't standard, that is why i am having a hard time getting the line number value
+                let line = self.get_line_number();
+                let msg = format!("[Line {}]: Invalid rvalue | Invalid assignment token", line);
+                return Err(ParseError::invalid_token(msg));
+            }
+        }
+        return Ok(expr);
     }
 
     fn equality(&mut self) -> Result<Expr, ParseError> {
@@ -289,6 +323,9 @@ impl Parser {
     fn previous(&self) -> TokenType {
         self.tokens[self.current - 1].token_type
     }
+    fn check(&self, expectation: TokenType) -> bool {
+        self.peek() == expectation
+    }
     fn at_end_of_stream(&self) -> bool {
         self.peek() == TokenType::EOF
     }
@@ -304,7 +341,7 @@ impl Parser {
     fn get_token_info(&self) -> Token {
         self.tokens[self.current].clone()
     }
-    // Token at current - 1
+    // Token at current - 1 // Refactor to just return token and get info from that; it has become very inefficient
     fn get_token_literal(&mut self) -> Literal {
         let index = self.current - 1;
         self.tokens[index]

@@ -1,2 +1,7 @@
-var a = 10;
-print a;
+var h = "Ninja";
+{
+    h = "Sinjo";
+    var k = h + " Hattori";
+    print k;
+}
+print h;
