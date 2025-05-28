@@ -1,6 +1,7 @@
 use crate::error::add_line;
 use crate::error::EvalError;
 use crate::parser::BinaryOp;
+use crate::parser::Declaration;
 use crate::parser::Expr;
 use crate::parser::Leaf;
 use crate::parser::Statement;
@@ -98,28 +99,30 @@ impl Evaluator {
     fn remove_env(&mut self) {
         self.environment.pop();
     }
-    pub fn evaluate(&mut self, statements: Vec<Statement>) -> Result<(), EvalError> {
-        for statement in statements {
-            match statement {
-                Statement::Expression { expr, line } => {
-                    self.evaluate_expr(&expr, line)?;
-                }
-                Statement::Print { expr, line } => {
-                    let value: Value = self.evaluate_expr(&expr, line)?;
-                    println!("{}", value);
-                }
-                Statement::Var { name, expr, line } => {
+    pub fn evaluate(&mut self, declarations: Vec<Declaration>) -> Result<(), EvalError> {
+        for declaration in declarations {
+            match declaration {
+                Declaration::Var { name, expr, line } => {
                     let value = self.evaluate_expr(&expr, line).map_err(|e| {
                         EvalError::undefined_variable(format!("{} {}", add_line(line), e))
                     })?; // So, I immediately evaluate the expression and assign it to the symbol table
                     self.insert_to_env(name, value);
-                } // _ => todo!(),
-                Statement::Block(statements) => {
-                    let new_environment: HashMap<String, Value> = HashMap::new();
-                    self.add_env(new_environment);
-                    self.evaluate(statements)?;
-                    self.remove_env();
                 }
+                Declaration::Statement(statement) => match statement {
+                    Statement::Expression { expr, line } => {
+                        self.evaluate_expr(&expr, line)?;
+                    }
+                    Statement::Print { expr, line } => {
+                        let value: Value = self.evaluate_expr(&expr, line)?;
+                        println!("{}", value);
+                    }
+                    Statement::Block(statements) => {
+                        let new_environment: HashMap<String, Value> = HashMap::new();
+                        self.add_env(new_environment);
+                        self.evaluate(statements)?;
+                        self.remove_env();
+                    }
+                },
             }
         }
         Ok(())

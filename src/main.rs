@@ -5,7 +5,7 @@ mod scanner;
 
 use error::{EvalError, ParseError};
 use evaluate::Evaluator;
-use parser::{Expr, Parser, Statement};
+use parser::{Declaration, Expr, Parser};
 use scanner::Scanner;
 
 use std::env;
@@ -88,7 +88,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn scan_and_parse_statements(filename: &String) -> Result<Vec<Statement>, (String, u8)> {
+fn scan_and_parse_statements(filename: &String) -> Result<Vec<Declaration>, (String, u8)> {
     let mut scanner = Scanner::new(&filename);
     let token_stream = scanner.run_scan();
     let mut parser = Parser::new(token_stream);

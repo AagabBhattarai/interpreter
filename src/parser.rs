@@ -126,21 +126,18 @@ impl std::fmt::Display for Expr {
     }
 }
 
-pub enum Statement {
-    Expression {
-        expr: Expr,
-        line: usize,
-    },
-    Print {
-        expr: Expr,
-        line: usize,
-    },
+pub enum Declaration {
     Var {
         name: String,
         expr: Expr,
         line: usize,
     },
-    Block(Vec<Statement>),
+    Statement(Statement),
+}
+pub enum Statement {
+    Expression { expr: Expr, line: usize },
+    Print { expr: Expr, line: usize },
+    Block(Vec<Declaration>),
 }
 
 pub struct Parser {
@@ -151,22 +148,22 @@ impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Self { tokens, current: 0 }
     }
-    pub fn parse_program(&mut self) -> Result<Vec<Statement>, ParseError> {
+    pub fn parse_program(&mut self) -> Result<Vec<Declaration>, ParseError> {
         let mut statements = Vec::new();
         while !self.at_end_of_stream() {
             statements.push(self.declarations()?);
         }
         Ok(statements)
     }
-    pub fn declarations(&mut self) -> Result<Statement, ParseError> {
+    pub fn declarations(&mut self) -> Result<Declaration, ParseError> {
         let line = self.get_line_number();
         if self.is_expected_token(TokenType::VAR) {
-            return Ok(self.var_statement(line)?);
+            return Ok(self.var_declaration(line)?);
         }
 
-        Ok(self.statement(line)?)
+        self.statement(line).map(Declaration::Statement)
     }
-    fn var_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
+    fn var_declaration(&mut self, line: usize) -> Result<Declaration, ParseError> {
         let name = self.consume(TokenType::IDENTIFIER, "Expected variable name")?;
 
         let expr = if self.is_expected_token(TokenType::EQUAL) {
@@ -175,7 +172,7 @@ impl Parser {
             Expr::Leaf(Leaf::Nil)
         };
         self.check_end_of_statement(line)?;
-        return Ok(Statement::Var { name, expr, line });
+        return Ok(Declaration::Var { name, expr, line });
     }
 
     fn statement(&mut self, line: usize) -> Result<Statement, ParseError> {
@@ -185,7 +182,7 @@ impl Parser {
         if self.is_expected_token(TokenType::LEFT_BRACE) {
             return Ok(self.block_statement(line)?);
         }
-        Ok(self.expression_statement(line)?)
+        self.expression_statement(line)
     }
     fn block_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
         let mut statements = Vec::new();
