@@ -104,6 +104,29 @@ impl From<TokenType> for BinaryOp {
         }
     }
 }
+#[derive(Debug)]
+pub enum LogicalOp {
+    And,
+    Or,
+}
+impl From<TokenType> for LogicalOp {
+    fn from(value: TokenType) -> Self {
+        match value {
+            TokenType::AND => LogicalOp::And,
+            TokenType::OR => LogicalOp::Or,
+            k => panic!("Token {:?} isn't a logical operator", k),
+        }
+    }
+}
+
+impl std::fmt::Display for LogicalOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogicalOp::And => write!(f, "and"),
+            LogicalOp::Or => write!(f, "or"),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum Expr {
@@ -112,6 +135,7 @@ pub enum Expr {
     Unary(UnaryOp, Box<Expr>),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Assignment(String, Box<Expr>),
+    Logical(Box<Expr>, LogicalOp, Box<Expr>),
 }
 
 impl std::fmt::Display for Expr {
@@ -122,6 +146,7 @@ impl std::fmt::Display for Expr {
             Expr::Unary(op, right) => write!(f, "({} {})", op, *right),
             Expr::Binary(left, op, right) => write!(f, "({1} {0} {2})", left, op, right),
             Expr::Assignment(l, r) => write!(f, "(= {} {})", l, r), // _ => todo!(),
+            Expr::Logical(left, op, right) => write!(f, "({1} {0} {2})", left, op, right),
         }
     }
 }
@@ -135,9 +160,26 @@ pub enum Declaration {
     Statement(Statement),
 }
 pub enum Statement {
-    Expression { expr: Expr, line: usize },
-    Print { expr: Expr, line: usize },
+    Expression {
+        expr: Expr,
+        line: usize,
+    },
+    Print {
+        expr: Expr,
+        line: usize,
+    },
     Block(Vec<Declaration>),
+    Conditional {
+        expr: Expr,
+        then_block: Box<Statement>,
+        else_block: Option<Box<Statement>>,
+        line: usize,
+    },
+    While {
+        expr: Expr,
+        block: Box<Statement>,
+        line: usize,
+    },
 }
 
 pub struct Parser {
@@ -158,10 +200,10 @@ impl Parser {
     pub fn declarations(&mut self) -> Result<Declaration, ParseError> {
         let line = self.get_line_number();
         if self.is_expected_token(TokenType::VAR) {
-            return Ok(self.var_declaration(line)?);
+            return self.var_declaration(line);
         }
 
-        self.statement(line).map(Declaration::Statement)
+        self.statement().map(Declaration::Statement)
     }
     fn var_declaration(&mut self, line: usize) -> Result<Declaration, ParseError> {
         let name = self.consume(TokenType::IDENTIFIER, "Expected variable name")?;
@@ -175,15 +217,120 @@ impl Parser {
         return Ok(Declaration::Var { name, expr, line });
     }
 
-    fn statement(&mut self, line: usize) -> Result<Statement, ParseError> {
+    fn statement(&mut self) -> Result<Statement, ParseError> {
+        let line = self.get_line_number();
         if self.is_expected_token(TokenType::PRINT) {
-            return Ok(self.print_statement(line)?);
+            return self.print_statement(line);
         }
         if self.is_expected_token(TokenType::LEFT_BRACE) {
-            return Ok(self.block_statement(line)?);
+            return self.block_statement(line);
         }
+        if self.is_expected_token(TokenType::IF) {
+            return self.conditional_statement(line);
+        }
+        if self.is_expected_token(TokenType::WHILE) {
+            return self.while_statement(line);
+        }
+        if self.is_expected_token(TokenType::FOR) {
+            return self.for_statement(line);
+        }
+
         self.expression_statement(line)
     }
+
+    fn for_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
+        let error_msg = |c: char| format!("Expected '{c}' in the 'for'");
+        self.consume(TokenType::LEFT_PAREN, &error_msg('('))?;
+        let initializer = if self.is_expected_token(TokenType::SEMICOLON) {
+            None
+        } else if self.is_expected_token(TokenType::VAR) {
+            Some(self.var_declaration(line)?)
+        } else {
+            Some(
+                self.expression_statement(line)
+                    .map(Declaration::Statement)?,
+            )
+        };
+
+        let condition = if self.check(TokenType::SEMICOLON) {
+            Expr::Leaf(Leaf::Boolean(true))
+        } else {
+            self.expression()?
+        };
+
+        self.consume(TokenType::SEMICOLON, &error_msg(';'))?;
+
+        let increment = if self.check(TokenType::RIGHT_PAREN) {
+            None
+        } else {
+            Some(self.expression()?)
+        };
+
+        self.consume(TokenType::RIGHT_PAREN, &error_msg(')'))?;
+
+        let body = self.statement()?;
+
+        let body = if let Some(increment) = increment {
+            let increment = Declaration::Statement(Statement::Expression {
+                expr: increment,
+                line,
+            });
+            let body = Declaration::Statement(body);
+            Statement::Block(vec![body, increment])
+        } else {
+            body
+        };
+
+        let body = Statement::While {
+            expr: condition,
+            block: Box::new(body),
+            line,
+        };
+
+        let body = if let Some(initializer) = initializer {
+            let body = Declaration::Statement(body);
+            Statement::Block(vec![initializer, body])
+        } else {
+            body
+        };
+
+        Ok(body)
+    }
+
+    fn while_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
+        let error_msg = |c: char| format!("Expected '{c}' in the 'while'");
+
+        self.consume(TokenType::LEFT_PAREN, &error_msg('('))?;
+        let expr = self.expression()?;
+        self.consume(TokenType::RIGHT_PAREN, &error_msg(')'))?;
+        let block = Box::new(self.statement()?);
+
+        Ok(Statement::While { expr, block, line })
+    }
+
+    fn conditional_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
+        let error_msg = |c: char| format!("Expected '{c}' in the 'if'");
+        self.consume(TokenType::LEFT_PAREN, &error_msg('('))?;
+        let expr = self.expression()?;
+        self.consume(TokenType::RIGHT_PAREN, &error_msg(')'))?;
+
+        let then_block = Box::new(self.statement()?);
+
+        let else_block = if self.is_expected_token(TokenType::ELSE) {
+            let block = self.statement()?;
+            Some(Box::new(block))
+        } else {
+            None
+        };
+
+        Ok(Statement::Conditional {
+            expr,
+            then_block,
+            else_block,
+            line,
+        })
+    }
+
     fn block_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
         let mut statements = Vec::new();
         while !self.check(TokenType::RIGHT_BRACE) && !self.at_end_of_stream() {
@@ -212,7 +359,7 @@ impl Parser {
     }
 
     fn assignment(&mut self) -> Result<Expr, ParseError> {
-        let expr = self.equality()?;
+        let expr = self.logical_or()?;
 
         if self.is_expected_token(TokenType::EQUAL) {
             let value = self.assignment()?;
@@ -229,7 +376,25 @@ impl Parser {
         }
         return Ok(expr);
     }
+    fn logical_or(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.logical_and()?;
+        while self.is_expected_token(TokenType::OR) {
+            let op = LogicalOp::from(self.previous());
+            let right = self.logical_and()?;
+            left = Expr::Logical(Box::new(left), op, Box::new(right));
+        }
+        Ok(left)
+    }
+    fn logical_and(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.equality()?;
 
+        while self.is_expected_token(TokenType::AND) {
+            let op = LogicalOp::from(self.previous());
+            let right = self.equality()?;
+            left = Expr::Logical(Box::new(left), op, Box::new(right));
+        }
+        Ok(left)
+    }
     fn equality(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.comparison()?;
         while self.is_expected_token(TokenType::BANG_EQUAL)

@@ -64,7 +64,7 @@ fn main() -> ExitCode {
         "run" => match scan_and_parse_statements(filename) {
             Ok(statements) => {
                 let mut evaluator = Evaluator::new();
-                match evaluator.evaluate(statements) {
+                match evaluator.evaluate(&statements) {
                     Ok(_) => return ExitCode::from(0),
                     Err(EvalError::OperandError(msg, code)) => {
                         eprintln!("{}", msg);

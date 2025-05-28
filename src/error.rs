@@ -42,7 +42,7 @@ impl std::fmt::Display for EvalError {
     }
 }
 
-pub fn add_line(line: usize) -> String {
-    let msg = format!("[Line: {}]", line);
-    msg
-}
+// pub fn add_line(line: usize) -> String {
+//     let msg = format!("[Line: {}]", line);
+//     msg
+// }

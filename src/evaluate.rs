@@ -1,9 +1,9 @@
-use crate::error::add_line;
 use crate::error::EvalError;
 use crate::parser::BinaryOp;
 use crate::parser::Declaration;
 use crate::parser::Expr;
 use crate::parser::Leaf;
+use crate::parser::LogicalOp;
 use crate::parser::Statement;
 use crate::parser::UnaryOp;
 use std::collections::HashMap;
@@ -81,8 +81,8 @@ impl Evaluator {
         self.environment.last_mut().unwrap()
     }
 
-    fn insert_to_env(&mut self, name: String, value: Value) {
-        self.current_environment().insert(name, value);
+    fn insert_to_env(&mut self, name: &String, value: Value) {
+        self.current_environment().insert(name.to_string(), value);
     }
 
     fn get_env(&self, name: &str) -> Option<&Value> {
@@ -99,34 +99,58 @@ impl Evaluator {
     fn remove_env(&mut self) {
         self.environment.pop();
     }
-    pub fn evaluate(&mut self, declarations: Vec<Declaration>) -> Result<(), EvalError> {
+    pub fn evaluate(&mut self, declarations: &Vec<Declaration>) -> Result<(), EvalError> {
         for declaration in declarations {
             match declaration {
                 Declaration::Var { name, expr, line } => {
-                    let value = self.evaluate_expr(&expr, line).map_err(|e| {
-                        EvalError::undefined_variable(format!("{} {}", add_line(line), e))
-                    })?; // So, I immediately evaluate the expression and assign it to the symbol table
+                    let value = self.evaluate_expr(&expr, *line)?; // So, I immediately evaluate the expression and assign it to the symbol table
                     self.insert_to_env(name, value);
                 }
-                Declaration::Statement(statement) => match statement {
-                    Statement::Expression { expr, line } => {
-                        self.evaluate_expr(&expr, line)?;
-                    }
-                    Statement::Print { expr, line } => {
-                        let value: Value = self.evaluate_expr(&expr, line)?;
-                        println!("{}", value);
-                    }
-                    Statement::Block(statements) => {
-                        let new_environment: HashMap<String, Value> = HashMap::new();
-                        self.add_env(new_environment);
-                        self.evaluate(statements)?;
-                        self.remove_env();
-                    }
-                },
+                Declaration::Statement(statement) => self.evaluate_statement(statement)?,
             }
         }
         Ok(())
     }
+    fn evaluate_statement(&mut self, statement: &Statement) -> Result<(), EvalError> {
+        match statement {
+            Statement::Expression { expr, line } => {
+                self.evaluate_expr(&expr, *line)?;
+            }
+            Statement::Print { expr, line } => {
+                let value: Value = self.evaluate_expr(&expr, *line)?;
+                println!("{}", value);
+            }
+            Statement::Block(statements) => {
+                let new_environment: HashMap<String, Value> = HashMap::new();
+                self.add_env(new_environment);
+                self.evaluate(statements)?;
+                self.remove_env();
+            }
+            Statement::Conditional {
+                expr,
+                then_block,
+                else_block,
+                line,
+            } => {
+                let value = &self.evaluate_expr(&expr, *line)?;
+                if self.is_truthy(value) {
+                    self.evaluate_statement(then_block.as_ref())?;
+                } else if let Some(else_block) = else_block {
+                    self.evaluate_statement(else_block.as_ref())?;
+                }
+            }
+            Statement::While { expr, block, line } => {
+                while {
+                    let result = self.evaluate_expr(expr, *line)?;
+                    self.is_truthy(&result)
+                } {
+                    self.evaluate_statement(block.as_ref())?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn evaluate_expr(&mut self, expr: &Expr, line: usize) -> Result<Value, EvalError> {
         // println!("{:?}", expr);
         match expr {
@@ -191,6 +215,23 @@ impl Evaluator {
                         return Ok(Value::Boolean(left != right));
                     }
                 }
+            }
+            Expr::Logical(left, op, right) => {
+                let left = self.evaluate_expr(left.as_ref(), line)?;
+
+                match op {
+                    LogicalOp::Or => {
+                        if self.is_truthy(&left) {
+                            return Ok(left);
+                        }
+                    }
+                    LogicalOp::And => {
+                        if !self.is_truthy(&left) {
+                            return Ok(left);
+                        }
+                    }
+                }
+                self.evaluate_expr(right.as_ref(), line)
             }
         }
     }
