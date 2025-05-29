@@ -1,5 +1,6 @@
 mod error;
 mod evaluate;
+mod native_function;
 mod parser;
 mod scanner;
 
@@ -44,7 +45,7 @@ fn main() -> ExitCode {
                 let mut evaluator = Evaluator::new();
                 let value = evaluator.evaluate_expr(&ast, 0);
                 match value {
-                    Ok(v) => println!("{}", v),
+                    Ok(evaluate::Referenceable::Value(v)) => println!("{}", v),
                     Err(EvalError::OperandError(msg, code)) => {
                         eprintln!("{}", msg);
                         return ExitCode::from(code);
@@ -53,6 +54,15 @@ fn main() -> ExitCode {
                         eprintln!("{}", msg);
                         return ExitCode::from(code);
                     }
+                    Err(EvalError::NotCallable(msg, code)) => {
+                        eprintln!("{}", msg);
+                        return ExitCode::from(code);
+                    }
+                    Err(EvalError::ArityError(msg, code)) => {
+                        eprintln!("{}", msg);
+                        return ExitCode::from(code);
+                    }
+                    _ => panic!("can't print anything except value"),
                 }
                 return ExitCode::from(0);
             }
@@ -63,7 +73,9 @@ fn main() -> ExitCode {
         },
         "run" => match scan_and_parse_statements(filename) {
             Ok(statements) => {
+                // println!("{:?}", statements);
                 let mut evaluator = Evaluator::new();
+                evaluator.register_native_functions();
                 match evaluator.evaluate(&statements) {
                     Ok(_) => return ExitCode::from(0),
                     Err(EvalError::OperandError(msg, code)) => {
@@ -71,6 +83,15 @@ fn main() -> ExitCode {
                         return ExitCode::from(code);
                     }
                     Err(EvalError::UndefinedVariable(msg, code)) => {
+                        eprintln!("{}", msg);
+                        return ExitCode::from(code);
+                    }
+                    Err(EvalError::NotCallable(msg, code)) => {
+                        eprintln!("{}", msg);
+                        return ExitCode::from(code);
+                    }
+
+                    Err(EvalError::ArityError(msg, code)) => {
                         eprintln!("{}", msg);
                         return ExitCode::from(code);
                     }

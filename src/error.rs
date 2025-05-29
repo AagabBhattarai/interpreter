@@ -21,6 +21,8 @@ impl ParseError {
 pub enum EvalError {
     OperandError(String, u8),
     UndefinedVariable(String, u8),
+    NotCallable(String, u8),
+    ArityError(String, u8),
 }
 impl EvalError {
     pub fn operand_error(msg: String) -> EvalError {
@@ -31,6 +33,14 @@ impl EvalError {
         let exit_code: u8 = 70;
         EvalError::UndefinedVariable(msg, exit_code)
     }
+    pub fn not_callable(msg: String) -> EvalError {
+        let exit_code: u8 = 70;
+        EvalError::NotCallable(msg, exit_code)
+    }
+    pub fn arity_error(msg: String) -> EvalError {
+        let exit_code: u8 = 70;
+        EvalError::NotCallable(msg, exit_code)
+    }
 }
 
 impl std::fmt::Display for EvalError {
@@ -38,6 +48,8 @@ impl std::fmt::Display for EvalError {
         match self {
             EvalError::OperandError(msg, _) => write!(f, "{}", msg),
             EvalError::UndefinedVariable(msg, _) => write!(f, "{}", msg),
+            EvalError::NotCallable(msg, _) => write!(f, "{}", msg),
+            EvalError::ArityError(msg, _) => write!(f, "{}", msg),
         }
     }
 }

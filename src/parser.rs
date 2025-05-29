@@ -1,7 +1,7 @@
 use crate::error::ParseError;
 use crate::scanner::{Literal, Token, TokenType};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Leaf {
     Text(String),
     Number(f64),
@@ -35,7 +35,7 @@ impl From<Literal> for Leaf {
         }
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UnaryOp {
     Not,
     Negation,
@@ -57,7 +57,7 @@ impl From<TokenType> for UnaryOp {
         }
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BinaryOp {
     Divide,
     Multiply,
@@ -104,7 +104,7 @@ impl From<TokenType> for BinaryOp {
         }
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum LogicalOp {
     And,
     Or,
@@ -128,7 +128,7 @@ impl std::fmt::Display for LogicalOp {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expr {
     Leaf(Leaf), // literal values
     Grouping(Box<Expr>),
@@ -136,6 +136,7 @@ pub enum Expr {
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Assignment(String, Box<Expr>),
     Logical(Box<Expr>, LogicalOp, Box<Expr>),
+    Call(Box<Expr>, Vec<Expr>),
 }
 
 impl std::fmt::Display for Expr {
@@ -147,10 +148,21 @@ impl std::fmt::Display for Expr {
             Expr::Binary(left, op, right) => write!(f, "({1} {0} {2})", left, op, right),
             Expr::Assignment(l, r) => write!(f, "(= {} {})", l, r), // _ => todo!(),
             Expr::Logical(left, op, right) => write!(f, "({1} {0} {2})", left, op, right),
+            Expr::Call(func, args) => {
+                let mut argument_string = String::new();
+                let add_args = |e: &Expr| {
+                    argument_string.push_str(format!("{},", e).as_str());
+                };
+                args.iter().for_each(add_args);
+                argument_string.pop();
+
+                write!(f, "({}({}))", func, argument_string)
+            }
         }
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum Declaration {
     Var {
         name: String,
@@ -158,7 +170,13 @@ pub enum Declaration {
         line: usize,
     },
     Statement(Statement),
+    Func {
+        name: Leaf,            //For classes probably need to change this to other type
+        parameters: Vec<Leaf>, // Need to have identifier class instead of packing it in a Leaf??
+        block: Statement,
+    },
 }
+#[derive(Debug, Clone)]
 pub enum Statement {
     Expression {
         expr: Expr,
@@ -178,6 +196,10 @@ pub enum Statement {
     While {
         expr: Expr,
         block: Box<Statement>,
+        line: usize,
+    },
+    Return {
+        expr: Expr,
         line: usize,
     },
 }
@@ -202,9 +224,51 @@ impl Parser {
         if self.is_expected_token(TokenType::VAR) {
             return self.var_declaration(line);
         }
+        if self.is_expected_token(TokenType::FUN) {
+            return self.function_declaration(line);
+        }
 
         self.statement().map(Declaration::Statement)
     }
+
+    fn function_declaration(&mut self, line: usize) -> Result<Declaration, ParseError> {
+        self.function(line)
+    }
+
+    fn function(&mut self, line: usize) -> Result<Declaration, ParseError> {
+        let name = self.consume(TokenType::IDENTIFIER, "Expected function identifier")?;
+        let name = Leaf::Identifier(name);
+
+        let mut parameters = Vec::new();
+        let msg = format!("Expected '(' in the function {} signature", &name);
+        self.consume(TokenType::LEFT_PAREN, &msg)?;
+
+        if !self.check(TokenType::RIGHT_PAREN) {
+            loop {
+                let msg = format!("Expected parameter in function {} signature", &name);
+                let param = self.consume(TokenType::IDENTIFIER, &msg)?;
+                parameters.push(Leaf::Identifier(param));
+                if !self.is_expected_token(TokenType::COMMA) {
+                    break;
+                }
+            }
+        }
+
+        let msg = format!("Expected closing ')' in the function {} signature", &name);
+        self.consume(TokenType::RIGHT_PAREN, &msg)?;
+
+        let msg = format!("Expected '{{' in the function {} body", &name);
+        self.consume(TokenType::RIGHT_BRACE, &msg)?;
+
+        let block = self.block_statement(line)?;
+
+        Ok(Declaration::Func {
+            name,
+            parameters,
+            block,
+        })
+    }
+
     fn var_declaration(&mut self, line: usize) -> Result<Declaration, ParseError> {
         let name = self.consume(TokenType::IDENTIFIER, "Expected variable name")?;
 
@@ -234,10 +298,25 @@ impl Parser {
         if self.is_expected_token(TokenType::FOR) {
             return self.for_statement(line);
         }
+        if self.is_expected_token(TokenType::RETURN) {
+            return self.return_statement(line);
+        }
 
         self.expression_statement(line)
     }
 
+    fn return_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
+        let expr = if !self.check(TokenType::SEMICOLON) {
+            self.expression()?
+        } else {
+            Expr::Leaf(Leaf::Nil)
+        };
+        self.consume(
+            TokenType::SEMICOLON,
+            "Expected ';' at the end of the statement",
+        )?;
+        Ok(Statement::Return { expr, line })
+    }
     fn for_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
         let error_msg = |c: char| format!("Expected '{c}' in the 'for'");
         self.consume(TokenType::LEFT_PAREN, &error_msg('('))?;
@@ -444,8 +523,35 @@ impl Parser {
                 Box::new(self.unary()?),
             ))
         } else {
-            self.primary()
+            self.call()
         }
+    }
+    fn call(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.primary()?;
+
+        loop {
+            if self.is_expected_token(TokenType::LEFT_PAREN) {
+                expr = self.process_call(expr)?;
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+    fn process_call(&mut self, callee: Expr) -> Result<Expr, ParseError> {
+        let mut args = Vec::new();
+        if !self.check(TokenType::RIGHT_PAREN) {
+            loop {
+                args.push(self.expression()?);
+
+                if !self.is_expected_token(TokenType::COMMA) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RIGHT_PAREN, "Expected a closing ')' in the call")?;
+        Ok(Expr::Call(Box::new(callee), args))
     }
     //This is such a bad design
     fn primary(&mut self) -> Result<Expr, ParseError> {
@@ -538,7 +644,7 @@ impl Parser {
         if self.is_expected_token(required_token) {
             Ok(value)
         } else {
-            let error_msg = format!("Line [{}]: {}", line, msg);
+            let error_msg = format!("Line [{}]: {} got {}", line, msg, value);
             Err(ParseError::invalid_token(error_msg))
         }
     }
