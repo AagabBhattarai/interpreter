@@ -94,6 +94,7 @@ fn main() -> ExitCode {
                         eprintln!("{}", msg);
                         return ExitCode::from(code);
                     }
+                    _ => panic!("Only return value is not included here")
                 }
             }
             Err((msg, code)) => {

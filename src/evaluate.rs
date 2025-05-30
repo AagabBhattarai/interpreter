@@ -113,18 +113,25 @@ impl Callable {
             interpreter.define(&param, arg.clone());
         }
 
-        interpreter.evaluate_statement(&self.block)?;
+        let result = interpreter.evaluate_statement(&self.block);
         swap(&mut function_scope, &mut interpreter.current_environment);
+        match result {
+            Ok(_) => return Ok(Referenceable::Value(Value::Nil)),
+            Err(EvalError::ReturnValue(value)) => return Ok(value),
+            Err(e) => return Err(e),
+        }
         // interpreter.evaluate(block)?;
-        Ok(Referenceable::Value(Value::Nil))
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum Referenceable {
     Value(Value),
-    Statement(Callable),
-    Native(fn(Vec<Referenceable>) -> Result<Referenceable, EvalError>),
+    Statement(Callable, String),
+    Native(
+        fn(Vec<Referenceable>) -> Result<Referenceable, EvalError>,
+        String,
+    ),
 }
 
 type ReferenceTable = HashMap<String, Referenceable>;
@@ -157,8 +164,10 @@ impl Environment {
             fn(Vec<Referenceable>) -> Result<Referenceable, EvalError>,
         )] = &[("clock", clock_native)];
         for (name, func) in NATIVE_FUNCTIONS.iter() {
-            self.environment
-                .insert(name.to_string(), Referenceable::Native(*func));
+            self.environment.insert(
+                name.to_string(),
+                Referenceable::Native(*func, name.to_string()),
+            );
         }
     }
     fn define(&mut self, name: &str, value: Referenceable) {
@@ -244,6 +253,12 @@ impl Evaluator {
         };
         self.current_environment = parent;
     }
+    fn global_scope(&self) -> bool {
+        let Some(_parent) = &self.current_environment.borrow().parent_environment else {
+            return true;
+        };
+        return false;
+    }
     pub fn evaluate(&mut self, declarations: &Vec<Declaration>) -> Result<(), EvalError> {
         for declaration in declarations {
             match declaration {
@@ -277,7 +292,7 @@ impl Evaluator {
                     let current_env = Rc::clone(&self.current_environment);
                     let info = Callable::new(params, block.clone(), current_env);
 
-                    self.define(name, Referenceable::Statement(info));
+                    self.define(name, Referenceable::Statement(info, name.to_string()));
                 }
             }
         }
@@ -290,12 +305,15 @@ impl Evaluator {
             }
             Statement::Print { expr, line } => {
                 let value = self.evaluate_expr(&expr, *line)?;
-                if let Referenceable::Value(v) = value {
-                    println!("{}", v);
-                } else {
-                    println!("{:?}", value);
-                    let msg = format!("[Line {}]: Expected value for print statement", line);
-                    return Err(EvalError::operand_error(msg));
+                match value {
+                    Referenceable::Value(v) => println!("{}", v),
+                    Referenceable::Statement(_, s) => println!("<fn {}>", s),
+                    Referenceable::Native(_, s) => println!("<native fn {}>", s),
+                    _ => {
+                        println!("{:?}", value);
+                        let msg = format!("[Line {}]: Expected value for print statement", line);
+                        return Err(EvalError::operand_error(msg));
+                    }
                 }
             }
             Statement::Block(statements) => {
@@ -333,6 +351,14 @@ impl Evaluator {
                 } {
                     self.evaluate_statement(block.as_ref())?;
                 }
+            }
+            Statement::Return { expr, line } => {
+                let result = self.evaluate_expr(expr, *line)?;
+                if !self.global_scope() {
+                    return Err(EvalError::ReturnValue(result));
+                }
+                let msg = format!("[Line {}] Can't return from global scope", line);
+                return Err(EvalError::invalid_return(msg));
             }
             _ => todo!(),
         }
@@ -515,11 +541,16 @@ impl Evaluator {
                 let evaluated_args = evaluated_args?;
 
                 match callee {
-                    Referenceable::Native(func) => return func(evaluated_args),
-                    Referenceable::Statement(mut callable) => {
+                    Referenceable::Native(func, _) => return func(evaluated_args),
+                    Referenceable::Statement(mut callable, _) => {
                         return callable.call(self, evaluated_args)
                     }
-                    _ => todo!(),
+                    Referenceable::Value(v) => {
+                        return Err(EvalError::not_callable(format!(
+                            "[Line {}] Can't call {} as a function",
+                            line, v,
+                        )))
+                    }
                 }
             }
         }

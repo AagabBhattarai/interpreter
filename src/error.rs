@@ -1,3 +1,5 @@
+use crate::evaluate::Referenceable;
+
 pub enum Errors {
     LexicalError(String, u8),
 }
@@ -23,6 +25,8 @@ pub enum EvalError {
     UndefinedVariable(String, u8),
     NotCallable(String, u8),
     ArityError(String, u8),
+    ReturnValue(Referenceable),
+    InvalidReturn(String, u8),
 }
 impl EvalError {
     pub fn operand_error(msg: String) -> EvalError {
@@ -41,6 +45,11 @@ impl EvalError {
         let exit_code: u8 = 70;
         EvalError::ArityError(msg, exit_code)
     }
+
+    pub fn invalid_return(msg: String) -> EvalError {
+        let exit_code: u8 = 70;
+        EvalError::UndefinedVariable(msg, exit_code)
+    }
 }
 
 impl std::fmt::Display for EvalError {
@@ -50,6 +59,7 @@ impl std::fmt::Display for EvalError {
             EvalError::UndefinedVariable(msg, _) => write!(f, "{}", msg),
             EvalError::NotCallable(msg, _) => write!(f, "{}", msg),
             EvalError::ArityError(msg, _) => write!(f, "{}", msg),
+            _ => panic!("Only return value case is not covered"),
         }
     }
 }
