@@ -39,7 +39,7 @@ impl EvalError {
     }
     pub fn arity_error(msg: String) -> EvalError {
         let exit_code: u8 = 70;
-        EvalError::NotCallable(msg, exit_code)
+        EvalError::ArityError(msg, exit_code)
     }
 }
 

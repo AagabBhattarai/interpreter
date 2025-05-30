@@ -1,3 +1,7 @@
+use std::cell::RefCell;
+use std::mem::swap;
+use std::rc::Rc;
+
 use crate::error::EvalError;
 use crate::native_function::clock_native;
 use crate::parser::BinaryOp;
@@ -70,14 +74,16 @@ impl From<&Leaf> for Value {
 //     fn call(evaluator: &mut Evaluator, )
 // }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Callable {
     params: Vec<String>,
     block: Statement,
-    closure: ReferenceTable,
+    // #[debug(with = "debug_closure")]
+    closure: Pointer,
 }
+
 impl Callable {
-    fn new(params: Vec<String>, block: Statement, closure: ReferenceTable) -> Self {
+    fn new(params: Vec<String>, block: Statement, closure: Pointer) -> Self {
         Self {
             params,
             block,
@@ -87,7 +93,7 @@ impl Callable {
     fn call(
         &mut self,
         interpreter: &mut Evaluator,
-        arguments: Vec<Value>,
+        arguments: Vec<Referenceable>,
     ) -> Result<Referenceable, EvalError> {
         if arguments.len() != self.params.len() {
             let msg = format!(
@@ -97,22 +103,24 @@ impl Callable {
             );
             return Err(EvalError::arity_error(msg));
         }
-        let mut global_reference_table = interpreter.global_environment();
-        let mut function_scope = ReferenceTable::new();
+        // let mut global_reference_table = interpreter.global_environment();
+        let mut function_scope = Rc::new(RefCell::new(Environment::create_child(Rc::clone(
+            &self.closure,
+        ))));
+        swap(&mut function_scope, &mut interpreter.current_environment);
+
         for (param, arg) in self.params.iter().zip(arguments.iter()) {
-            let value = Referenceable::Value(arg.clone());
-            function_scope.insert(param.clone(), value);
+            interpreter.define(&param, arg.clone());
         }
-        let block = match &self.block {
-            Statement::Block(b) => b,
-            _ => panic!("Unreachable state of function call reached"),
-        };
-        interpreter.evaluate(block)?;
+
+        interpreter.evaluate_statement(&self.block)?;
+        swap(&mut function_scope, &mut interpreter.current_environment);
+        // interpreter.evaluate(block)?;
         Ok(Referenceable::Value(Value::Nil))
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Referenceable {
     Value(Value),
     Statement(Callable),
@@ -120,58 +128,128 @@ pub enum Referenceable {
 }
 
 type ReferenceTable = HashMap<String, Referenceable>;
+type Pointer = Rc<RefCell<Environment>>;
 
-pub struct Evaluator {
-    pub environment: Vec<ReferenceTable>,
+#[derive(Debug)]
+pub struct Environment {
+    environment: ReferenceTable,
+    parent_environment: Option<Pointer>,
 }
 
-impl Evaluator {
+impl Environment {
     pub fn new() -> Self {
         Self {
-            environment: vec![HashMap::new()],
+            environment: ReferenceTable::new(),
+            parent_environment: None,
         }
     }
+
+    fn create_child(parent: Pointer) -> Self {
+        Self {
+            environment: ReferenceTable::new(),
+            parent_environment: Some(parent),
+        }
+    }
+
     pub fn register_native_functions(&mut self) {
         const NATIVE_FUNCTIONS: &[(
             &str,
             fn(Vec<Referenceable>) -> Result<Referenceable, EvalError>,
         )] = &[("clock", clock_native)];
-        let global_env = self.global_environment();
         for (name, func) in NATIVE_FUNCTIONS.iter() {
-            global_env.insert(name.to_string(), Referenceable::Native(*func));
+            self.environment
+                .insert(name.to_string(), Referenceable::Native(*func));
         }
     }
-    pub fn global_environment(&mut self) -> &mut ReferenceTable {
-        self.environment.first_mut().unwrap()
-    }
-    fn current_environment(&mut self) -> &mut ReferenceTable {
-        self.environment.last_mut().unwrap()
+    fn define(&mut self, name: &str, value: Referenceable) {
+        self.environment.insert(name.to_string(), value);
     }
 
-    fn insert_to_env(&mut self, name: &String, value: Referenceable) {
-        self.current_environment().insert(name.to_string(), value);
-    }
-
-    fn get_env(&self, name: &str) -> Option<&Referenceable> {
-        for env in self.environment.iter().rev() {
-            if let Some(value) = env.get(name) {
-                return Some(value);
-            }
+    fn lookup(&self, name: &str) -> Option<Referenceable> {
+        if let Some(value) = self.environment.get(name) {
+            return Some(value.clone());
+        }
+        if let Some(parent) = &self.parent_environment {
+            return parent.borrow().lookup(name);
         }
         None
     }
-    fn add_env(&mut self, new_env: ReferenceTable) {
-        self.environment.push(new_env);
+
+    fn set(&mut self, name: &str, value: Referenceable, kind: &str) -> Result<(), String> {
+        if self.environment.contains_key(name) {
+            self.environment.insert(name.to_string(), value);
+            return Ok(());
+        }
+        if let Some(parent) = &self.parent_environment {
+            return parent.borrow_mut().set(name, value, kind);
+        }
+
+        Err(format!("Undefined {} {}", kind, name))
     }
-    fn remove_env(&mut self) {
-        self.environment.pop();
+}
+// pub struct Evaluator {
+//     pub environment: Vec<ReferenceTable>,
+// }
+pub struct Evaluator {
+    pub current_environment: Pointer,
+}
+
+impl Evaluator {
+    pub fn new() -> Self {
+        let mut environment = Environment::new();
+        environment.register_native_functions();
+        Self {
+            current_environment: Rc::new(RefCell::new(environment)),
+        }
+    }
+
+    fn define(&mut self, name: &str, value: Referenceable) {
+        self.current_environment.borrow_mut().define(name, value);
+    }
+    fn update(
+        &mut self,
+        name: &str,
+        value: Referenceable,
+        kind: &str,
+        line: usize,
+    ) -> Result<(), EvalError> {
+        let mut current_env = self.current_environment.borrow_mut();
+        match current_env.set(name, value, kind) {
+            Ok(_) => Ok(()),
+            Err(msg) => {
+                let msg = format!("[Line {}]: {}", line, msg);
+                Err(EvalError::undefined_variable(msg))
+            }
+        }
+    }
+    fn lookup(&self, name: &str, kind: &str, line: usize) -> Result<Referenceable, EvalError> {
+        match self.current_environment.borrow().lookup(name) {
+            Some(v) => Ok(v),
+            None => {
+                let msg = format!("[Line {}]: Undefined {}", line, kind);
+                Err(EvalError::undefined_variable(msg)) //Resolution Error
+            }
+        }
+    }
+
+    fn new_scope(&mut self) {
+        let scope = Environment::create_child(Rc::clone(&self.current_environment));
+        let scope = Rc::new(RefCell::new(scope));
+        self.current_environment = scope
+    }
+    fn end_scope(&mut self) {
+        let parent = match &self.current_environment.borrow().parent_environment {
+            Some(parent) => Rc::clone(parent),
+            None => return,
+        };
+        self.current_environment = parent;
     }
     pub fn evaluate(&mut self, declarations: &Vec<Declaration>) -> Result<(), EvalError> {
         for declaration in declarations {
             match declaration {
                 Declaration::Var { name, expr, line } => {
                     let value = self.evaluate_expr(&expr, *line)?; // So, I immediately evaluate the expression and assign it to the symbol table
-                    self.insert_to_env(name, value);
+                    self.define(name, value);
                 }
                 Declaration::Statement(statement) => self.evaluate_statement(statement)?,
                 Declaration::Func {
@@ -196,10 +274,10 @@ impl Evaluator {
                         })
                         .collect::<Result<Vec<String>, EvalError>>()?;
 
-                    let info =
-                        Callable::new(params, block.clone(), self.current_environment().clone());
+                    let current_env = Rc::clone(&self.current_environment);
+                    let info = Callable::new(params, block.clone(), current_env);
 
-                    self.insert_to_env(name, Referenceable::Statement(info));
+                    self.define(name, Referenceable::Statement(info));
                 }
             }
         }
@@ -215,15 +293,15 @@ impl Evaluator {
                 if let Referenceable::Value(v) = value {
                     println!("{}", v);
                 } else {
+                    println!("{:?}", value);
                     let msg = format!("[Line {}]: Expected value for print statement", line);
                     return Err(EvalError::operand_error(msg));
                 }
             }
             Statement::Block(statements) => {
-                let new_environment: ReferenceTable = HashMap::new();
-                self.add_env(new_environment);
+                self.new_scope();
                 self.evaluate(statements)?;
-                self.remove_env();
+                self.end_scope();
             }
             Statement::Conditional {
                 expr,
@@ -266,9 +344,14 @@ impl Evaluator {
         match expr {
             Expr::Assignment(identifier, value) => {
                 let value = self.evaluate_expr(value.as_ref(), line)?;
-                let result = self.assign(identifier, value, line)?;
+                let kind = &"variable";
+                self.update(identifier, value, kind, line)?;
+                let result = self.lookup(&identifier, kind, line)?;
+
                 match result {
                     Referenceable::Value(v) => Ok(Referenceable::Value(v)),
+
+                    //Add Referenceable Callable too
                     _ => {
                         let msg = format!("[Line {}]: Expected value for assignment", line);
                         return Err(EvalError::operand_error(msg));
@@ -276,18 +359,8 @@ impl Evaluator {
                 }
             }
             Expr::Leaf(Leaf::Identifier(s)) => {
-                let value = self.get_env(s);
-                match value {
-                    Some(v) => return Ok(v.clone()),
-                    None => {
-                        let msg = format!("[Line {}]: Undefined variable {}", line, s);
-                        return Err(EvalError::undefined_variable(msg));
-                    }
-                    _ => {
-                        let msg = format!("[Line {}]: Expected value for identifier", line);
-                        return Err(EvalError::operand_error(msg));
-                    }
-                }
+                let kind = &"Identifier";
+                self.lookup(s, kind, line)
             }
             Expr::Leaf(l) => return Ok(Referenceable::Value(Value::from(l))),
             Expr::Grouping(b) => return self.evaluate_expr(b.as_ref(), line),
@@ -443,6 +516,9 @@ impl Evaluator {
 
                 match callee {
                     Referenceable::Native(func) => return func(evaluated_args),
+                    Referenceable::Statement(mut callable) => {
+                        return callable.call(self, evaluated_args)
+                    }
                     _ => todo!(),
                 }
             }
@@ -454,27 +530,5 @@ impl Evaluator {
             Value::Boolean(b) => *b,
             _ => true,
         }
-    }
-    fn get_env_mut(&mut self, name: &str) -> Option<&mut Referenceable> {
-        for env in self.environment.iter_mut().rev() {
-            if let Some(value) = env.get_mut(name) {
-                return Some(value);
-            }
-        }
-        None
-    }
-    fn assign(
-        &mut self,
-        key: &str,
-        value: Referenceable,
-        line: usize,
-    ) -> Result<Referenceable, EvalError> {
-        let Some(k) = self.get_env_mut(key) else {
-            let msg = format!("[Line {}]: Undefined variable '{}' used", line, key);
-            return Err(EvalError::undefined_variable(msg));
-        };
-
-        *k = value.clone();
-        Ok(value)
     }
 }

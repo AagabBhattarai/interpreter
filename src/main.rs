@@ -75,7 +75,6 @@ fn main() -> ExitCode {
             Ok(statements) => {
                 // println!("{:?}", statements);
                 let mut evaluator = Evaluator::new();
-                evaluator.register_native_functions();
                 match evaluator.evaluate(&statements) {
                     Ok(_) => return ExitCode::from(0),
                     Err(EvalError::OperandError(msg, code)) => {

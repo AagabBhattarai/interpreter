@@ -258,7 +258,7 @@ impl Parser {
         self.consume(TokenType::RIGHT_PAREN, &msg)?;
 
         let msg = format!("Expected '{{' in the function {} body", &name);
-        self.consume(TokenType::RIGHT_BRACE, &msg)?;
+        self.consume(TokenType::LEFT_BRACE, &msg)?;
 
         let block = self.block_statement(line)?;
 
