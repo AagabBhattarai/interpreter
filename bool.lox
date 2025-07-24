@@ -1,0 +1,10 @@
+fun a(count) {
+	fun counter() {
+		return count = count +1 ;
+	}	
+	return counter;
+}
+
+var counter = a(10);
+print counter();
+print counter();

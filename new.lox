@@ -1,0 +1,8 @@
+fun a(){
+	return 10;
+}
+var b = 100;
+print b;
+b = a;
+print b;
+print b();

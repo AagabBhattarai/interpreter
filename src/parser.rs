@@ -278,7 +278,7 @@ impl Parser {
             Expr::Leaf(Leaf::Nil)
         };
         self.check_end_of_statement(line)?;
-        return Ok(Declaration::Var { name, expr, line });
+        Ok(Declaration::Var { name, expr, line })
     }
 
     fn statement(&mut self) -> Result<Statement, ParseError> {

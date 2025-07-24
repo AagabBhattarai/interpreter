@@ -280,12 +280,12 @@ impl Evaluator {
                                 name
                             )))
                         }
-                    };
+                    };  
                     let params = parameters
                         .iter()
                         .map(|p| match p {
                             Leaf::Identifier(s) => Ok(s.clone()),
-                            _ => Err(EvalError::not_callable(format!("{} is not callable", p))),
+                            _ => Err(EvalError::not_callable(format!("{} is not a valid parameter to fun {}", p, name))),
                         })
                         .collect::<Result<Vec<String>, EvalError>>()?;
 
@@ -372,17 +372,7 @@ impl Evaluator {
                 let value = self.evaluate_expr(value.as_ref(), line)?;
                 let kind = &"variable";
                 self.update(identifier, value, kind, line)?;
-                let result = self.lookup(&identifier, kind, line)?;
-
-                match result {
-                    Referenceable::Value(v) => Ok(Referenceable::Value(v)),
-
-                    //Add Referenceable Callable too
-                    _ => {
-                        let msg = format!("[Line {}]: Expected value for assignment", line);
-                        return Err(EvalError::operand_error(msg));
-                    }
-                }
+                self.lookup(&identifier, kind, line) // print a=10; prints 10 because assignment returns value
             }
             Expr::Leaf(Leaf::Identifier(s)) => {
                 let kind = &"Identifier";
@@ -526,6 +516,7 @@ impl Evaluator {
             Expr::Call(callee, arguments) => {
                 let callee = self.evaluate_expr(callee.as_ref(), line)?;
 
+                // redundant? but for specific test case this check is present
                 let callee = match callee {
                     Referenceable::Value(Value::String(s)) => {
                         let msg = format!("{} is not callable", s);
