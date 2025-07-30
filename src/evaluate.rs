@@ -3,7 +3,6 @@ use std::mem::swap;
 use std::rc::Rc;
 
 use crate::error::EvalError;
-use crate::native_function::clock_native;
 use crate::parser::BinaryOp;
 use crate::parser::Declaration;
 use crate::parser::Expr;
@@ -11,7 +10,6 @@ use crate::parser::Leaf;
 use crate::parser::LogicalOp;
 use crate::parser::Statement;
 use crate::parser::UnaryOp;
-use std::collections::HashMap;
 // BOTH Value and leaf enum are same don't repeat things??? Refactor fast but later
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -134,71 +132,10 @@ pub enum Referenceable {
     ),
 }
 
-type ReferenceTable = HashMap<String, Referenceable>;
-type Pointer = Rc<RefCell<Environment>>;
-
-#[derive(Debug)]
-pub struct Environment {
-    environment: ReferenceTable,
-    parent_environment: Option<Pointer>,
-}
-
-impl Environment {
-    pub fn new() -> Self {
-        Self {
-            environment: ReferenceTable::new(),
-            parent_environment: None,
-        }
-    }
-
-    fn create_child(parent: Pointer) -> Self {
-        Self {
-            environment: ReferenceTable::new(),
-            parent_environment: Some(parent),
-        }
-    }
-
-    pub fn register_native_functions(&mut self) {
-        const NATIVE_FUNCTIONS: &[(
-            &str,
-            fn(Vec<Referenceable>) -> Result<Referenceable, EvalError>,
-        )] = &[("clock", clock_native)];
-        for (name, func) in NATIVE_FUNCTIONS.iter() {
-            self.environment.insert(
-                name.to_string(),
-                Referenceable::Native(*func, name.to_string()),
-            );
-        }
-    }
-    fn define(&mut self, name: &str, value: Referenceable) {
-        self.environment.insert(name.to_string(), value);
-    }
-
-    fn lookup(&self, name: &str) -> Option<Referenceable> {
-        if let Some(value) = self.environment.get(name) {
-            return Some(value.clone());
-        }
-        if let Some(parent) = &self.parent_environment {
-            return parent.borrow().lookup(name);
-        }
-        None
-    }
-
-    fn set(&mut self, name: &str, value: Referenceable, kind: &str) -> Result<(), String> {
-        if self.environment.contains_key(name) {
-            self.environment.insert(name.to_string(), value);
-            return Ok(());
-        }
-        if let Some(parent) = &self.parent_environment {
-            return parent.borrow_mut().set(name, value, kind);
-        }
-
-        Err(format!("Undefined {} {}", kind, name))
-    }
-}
-// pub struct Evaluator {
-//     pub environment: Vec<ReferenceTable>,
-// }
+    // pub struct Evaluator {
+    //     pub environment: Vec<ReferenceTable>,
+    // }
+use crate::environment::*;
 pub struct Evaluator {
     pub current_environment: Pointer,
 }

@@ -1,8 +1,11 @@
+#![allow(unreachable_patterns, dead_code)]
+
 mod error;
 mod evaluate;
 mod native_function;
 mod parser;
 mod scanner;
+mod environment;
 
 use error::{EvalError, ParseError};
 use evaluate::Evaluator;
