@@ -3,7 +3,7 @@ use crate::{
     expression::{Expr, ExprId, ExprKind},
     parser::{Declaration, Leaf, Statement},
 };
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
 struct Scopes {
     stack: Vec<HashMap<String, bool>>,
@@ -70,7 +70,9 @@ impl Resolver {
         &mut self,
         declarations: &Vec<Declaration>,
     ) -> Result<HashMap<ExprId, usize>, ResolutionError> {
+        self.scopes.new_scope();
         self.resolve_declarations(declarations)?;
+        self.scopes.end_scope();
         Ok(std::mem::take(&mut self.depth))
 
         /*         let mut d = HashMap::new();
