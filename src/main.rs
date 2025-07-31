@@ -9,10 +9,11 @@ mod parser;
 mod resolver;
 mod scanner;
 
-use error::{EvalError, ParseError};
+use error::{EvalError, ParseError, ResolutionError};
 use evaluate::Evaluator;
 use expression::Expr;
 use parser::{Declaration, Parser};
+use resolver::Resolver;
 use scanner::Scanner;
 
 use std::env;
@@ -71,6 +72,26 @@ fn main() -> ExitCode {
                     _ => panic!("can't print anything except value"),
                 }
                 return ExitCode::from(0);
+            }
+            Err((msg, code)) => {
+                eprintln!("{msg}");
+                return ExitCode::from(code);
+            }
+        },
+        "resolve" => match scan_and_parse_statements(filename) {
+            Ok(statements) => {
+                println!("{:#?}", statements);
+                let mut resolver = Resolver::new();
+                match resolver.resolve(&statements) {
+                    Ok(depths) => {
+                        println!("Resolution successful. Variable depths: {:#?}", depths);
+                        return ExitCode::from(0);
+                    }
+                    Err(ResolutionError::ReDeclaration(msg, code)) => {
+                        eprintln!("{}", msg);
+                        return ExitCode::from(code);
+                    }
+                }
             }
             Err((msg, code)) => {
                 eprintln!("{msg}");

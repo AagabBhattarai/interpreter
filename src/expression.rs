@@ -5,12 +5,12 @@ pub enum ExprKind {
     Grouping(Box<Expr>),
     Unary(UnaryOp, Box<Expr>),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
-    Assignment(String, Box<Expr>),
+    Assignment(Box<Expr>, Box<Expr>),
     Logical(Box<Expr>, LogicalOp, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ExprId(usize);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,9 +82,9 @@ impl ExprBuilder {
         }
     }
 
-    pub fn assignment(&mut self, name: String, expr: Expr) -> Expr {
+    pub fn assignment(&mut self, name: Expr, expr: Expr) -> Expr {
         Expr {
-            data: ExprKind::Assignment(name, Box::new(expr)),
+            data: ExprKind::Assignment(Box::new(name), Box::new(expr)),
             id: self.get_id(),
         }
     }

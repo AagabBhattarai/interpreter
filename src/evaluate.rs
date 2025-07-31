@@ -304,6 +304,13 @@ impl Evaluator {
         // println!("{:?}", expr);
         match &expr.data {
             ExprKind::Assignment(identifier, value) => {
+                let identifier = if let ExprKind::Leaf(Leaf::Identifier(id)) = &identifier.data {
+                    id
+                } else {
+                    panic!(
+                        "Assignment can only have identifier at lvalue, should already be handled"
+                    )
+                };
                 let value = self.evaluate_expr(value.as_ref(), line)?;
                 let kind = &"variable";
                 self.update(identifier, value, kind, line)?;

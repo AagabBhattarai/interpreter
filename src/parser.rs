@@ -419,8 +419,9 @@ impl Parser {
 
             // I can't evaluate it yet, but i have a inkling that placing identifier at leaf will require refactor # FOR NOW LET'S move forward.
             // Need to have assignment for field acess too.
-            if let ExprKind::Leaf(Leaf::Identifier(lvalue)) = expr.data {
-                return Ok(self.expr_builder.assignment(lvalue, value));
+            if let ExprKind::Leaf(Leaf::Identifier(lvalue)) = &expr.data {
+                return Ok(self.expr_builder.assignment(expr, value));
+                // return Ok(self.expr_builder.assignment(lvalue, value));
             } else {
                 // Again error reporting mechanism isn't standard, that is why i am having a hard time getting the line number value
                 let line = self.get_line_number();
