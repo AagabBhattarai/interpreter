@@ -16,9 +16,12 @@ use parser::{Declaration, Parser};
 use resolver::Resolver;
 use scanner::Scanner;
 
+use std::collections::HashMap;
 use std::env;
 use std::io::{self, Write};
 use std::process::ExitCode;
+
+use crate::expression::ExprId;
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
@@ -49,29 +52,43 @@ fn main() -> ExitCode {
         },
         "evaluate" => match scan_and_parse(filename) {
             Ok(ast) => {
-                let mut evaluator = Evaluator::new();
-                let value = evaluator.evaluate_expr(&ast, 0);
-                match value {
-                    Ok(evaluate::Referenceable::Value(v)) => println!("{}", v),
-                    Err(EvalError::OperandError(msg, code)) => {
+                // Wrap ast: Expr in Statement::Expr, then in Declaration::Statement, then in a Vec
+                let statement = parser::Statement::Expression {
+                    expr: ast.clone(),
+                    line: 0,
+                };
+                let declaration = Declaration::Statement(statement);
+                let statements = vec![declaration];
+
+                // Run resolver on the statements to get depths
+                match run_resolver(&statements) {
+                    Ok(depths) => {
+                        // Use the same AST (statements) for evaluation
+                        let mut evaluator = Evaluator::new(depths);
+                        match evaluator.evaluate_expr(&ast, 0) {
+                            Ok(value) => match value {
+                                evaluate::Referenceable::Value(val) => println!("{}", val),
+                                _ => {
+                                    eprintln!("Error: Expression did not evaluate to a value.");
+                                    return ExitCode::from(1);
+                                }
+                            },
+                            Err(EvalError::OperandError(msg, code))
+                            | Err(EvalError::UndefinedVariable(msg, code))
+                            | Err(EvalError::NotCallable(msg, code))
+                            | Err(EvalError::ArityError(msg, code)) => {
+                                eprintln!("{}", msg);
+                                return ExitCode::from(code);
+                            }
+                            _ => panic!("can't print anything except value"),
+                        }
+                        return ExitCode::from(0);
+                    }
+                    Err((msg, code)) => {
                         eprintln!("{}", msg);
                         return ExitCode::from(code);
                     }
-                    Err(EvalError::UndefinedVariable(msg, code)) => {
-                        eprintln!("{}", msg);
-                        return ExitCode::from(code);
-                    }
-                    Err(EvalError::NotCallable(msg, code)) => {
-                        eprintln!("{}", msg);
-                        return ExitCode::from(code);
-                    }
-                    Err(EvalError::ArityError(msg, code)) => {
-                        eprintln!("{}", msg);
-                        return ExitCode::from(code);
-                    }
-                    _ => panic!("can't print anything except value"),
                 }
-                return ExitCode::from(0);
             }
             Err((msg, code)) => {
                 eprintln!("{msg}");
@@ -98,30 +115,31 @@ fn main() -> ExitCode {
                 return ExitCode::from(code);
             }
         },
+        // Next task clean up all this main.rs repeatation
         "run" => match scan_and_parse_statements(filename) {
             Ok(statements) => {
-                println!("{:#?}", statements);
-                let mut evaluator = Evaluator::new();
-                match evaluator.evaluate(&statements) {
-                    Ok(_) => return ExitCode::from(0),
-                    Err(EvalError::OperandError(msg, code)) => {
+                // println!("{:#?}", statements);
+                match run_resolver(&statements) {
+                    Ok(depth) => {
+                        let mut evaluator = Evaluator::new(depth);
+                        match evaluator.evaluate(&statements) {
+                            Ok(_) => return ExitCode::from(0),
+                            Err(e) => match e {
+                                EvalError::OperandError(msg, code)
+                                | EvalError::UndefinedVariable(msg, code)
+                                | EvalError::NotCallable(msg, code)
+                                | EvalError::ArityError(msg, code) => {
+                                    eprintln!("{}", msg);
+                                    return ExitCode::from(code);
+                                }
+                                _ => panic!("Only return value is not included here"),
+                            },
+                        }
+                    }
+                    Err((msg, code)) => {
                         eprintln!("{}", msg);
                         return ExitCode::from(code);
                     }
-                    Err(EvalError::UndefinedVariable(msg, code)) => {
-                        eprintln!("{}", msg);
-                        return ExitCode::from(code);
-                    }
-                    Err(EvalError::NotCallable(msg, code)) => {
-                        eprintln!("{}", msg);
-                        return ExitCode::from(code);
-                    }
-
-                    Err(EvalError::ArityError(msg, code)) => {
-                        eprintln!("{}", msg);
-                        return ExitCode::from(code);
-                    }
-                    _ => panic!("Only return value is not included here"),
                 }
             }
             Err((msg, code)) => {
@@ -133,6 +151,16 @@ fn main() -> ExitCode {
             writeln!(io::stderr(), "Unknown command: {}", command).unwrap();
             return ExitCode::FAILURE;
         }
+    }
+}
+fn run_resolver(declarations: &Vec<Declaration>) -> Result<HashMap<ExprId, usize>, (String, u8)> {
+    let mut resolver = Resolver::new();
+    match resolver.resolve(&declarations) {
+        Ok(depths) => {
+            // println!("Resolution successful. Variable depths: {:#?}", depths);
+            Ok(depths)
+        }
+        Err(ResolutionError::ReDeclaration(msg, code)) => Err((msg, code)),
     }
 }
 

@@ -1,9 +1,9 @@
 use crate::error::EvalError;
 use crate::evaluate::Referenceable;
+use crate::native_function::clock_native;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::cell::RefCell;
-use crate::native_function::clock_native;
 
 pub type ReferenceTable = HashMap<String, Referenceable>;
 pub type Pointer = Rc<RefCell<Environment>>;
@@ -55,6 +55,17 @@ impl Environment {
         None
     }
 
+    pub fn lookup_at(&self, name: &str, depth: usize) -> Referenceable {
+        if depth == 0 {
+            self.environment.get(name).unwrap().clone()
+        } else {
+            self.parent_environment
+                .as_ref()
+                .expect("Resolver and environment depth mismatch")
+                .borrow()
+                .lookup_at(name, depth - 1)
+        }
+    }
     pub fn set(&mut self, name: &str, value: Referenceable, kind: &str) -> Result<(), String> {
         if self.environment.contains_key(name) {
             self.environment.insert(name.to_string(), value);
@@ -65,5 +76,16 @@ impl Environment {
         }
 
         Err(format!("Undefined {} {}", kind, name))
+    }
+    pub fn set_at(&mut self, name: &str, value: Referenceable, depth: usize, kind: &str) {
+        if depth == 0 {
+            self.environment.insert(name.to_string(), value);
+        } else {
+            self.parent_environment
+                .as_mut()
+                .expect("Resolver and environment depth mismatch to set var")
+                .borrow_mut()
+                .set_at(name, value, depth - 1, kind)
+        }
     }
 }

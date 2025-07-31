@@ -419,7 +419,7 @@ impl Parser {
 
             // I can't evaluate it yet, but i have a inkling that placing identifier at leaf will require refactor # FOR NOW LET'S move forward.
             // Need to have assignment for field acess too.
-            if let ExprKind::Leaf(Leaf::Identifier(lvalue)) = &expr.data {
+            if let ExprKind::Leaf(Leaf::Identifier(_lvalue)) = &expr.data {
                 return Ok(self.expr_builder.assignment(expr, value));
                 // return Ok(self.expr_builder.assignment(lvalue, value));
             } else {

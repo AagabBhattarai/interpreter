@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::mem::swap;
 use std::rc::Rc;
 
@@ -133,17 +134,19 @@ pub enum Referenceable {
 use crate::environment::*;
 pub struct Evaluator {
     pub current_environment: Pointer,
+    pub depth: HashMap<ExprId, usize>,
 }
 
 impl Evaluator {
-    pub fn new() -> Self {
+    pub fn new(depth: HashMap<ExprId, usize>) -> Self {
         let mut environment = Environment::new();
         environment.register_native_functions();
         Self {
             current_environment: Rc::new(RefCell::new(environment)),
+            depth,
         }
     }
-
+    // fn define(&mut self, )
     fn define(&mut self, name: &str, value: Referenceable) {
         self.current_environment.borrow_mut().define(name, value);
     }
@@ -171,6 +174,40 @@ impl Evaluator {
                 Err(EvalError::undefined_variable(msg)) //Resolution Error
             }
         }
+    }
+    fn update_at(
+        &mut self,
+        id: ExprId,
+        name: &str,
+        value: Referenceable,
+        kind: &str,
+        line: usize,
+    ) -> Result<(), EvalError> {
+        let depth = if let Some(depth) = self.depth.get(&id) {
+            *depth
+        } else {
+            let msg = format!("[Line {}]: Undefined {} {}", line, kind, name);
+            return Err(EvalError::undefined_variable(msg)); //Resolution Error
+        };
+        self.current_environment
+            .borrow_mut()
+            .set_at(name, value, depth, kind);
+        Ok(())
+    }
+    fn lookup_at(
+        &self,
+        id: ExprId,
+        name: &str,
+        kind: &str,
+        line: usize,
+    ) -> Result<Referenceable, EvalError> {
+        let depth = if let Some(depth) = self.depth.get(&id) {
+            *depth
+        } else {
+            let msg = format!("[Line {}]: Undefined {} {}", line, kind, name);
+            return Err(EvalError::undefined_variable(msg)); //Resolution Error
+        };
+        Ok(self.current_environment.borrow().lookup_at(name, depth))
     }
 
     fn new_scope(&mut self) {
@@ -304,6 +341,7 @@ impl Evaluator {
         // println!("{:?}", expr);
         match &expr.data {
             ExprKind::Assignment(identifier, value) => {
+                let lvalue_id = identifier.id;
                 let identifier = if let ExprKind::Leaf(Leaf::Identifier(id)) = &identifier.data {
                     id
                 } else {
@@ -313,12 +351,12 @@ impl Evaluator {
                 };
                 let value = self.evaluate_expr(value.as_ref(), line)?;
                 let kind = &"variable";
-                self.update(identifier, value, kind, line)?;
-                self.lookup(&identifier, kind, line) // print a=10; prints 10 because assignment returns value
+                self.update_at(lvalue_id, identifier, value, kind, line)?;
+                self.lookup_at(lvalue_id, &identifier, kind, line) // print a=10; prints 10 because assignment returns value
             }
             ExprKind::Leaf(Leaf::Identifier(s)) => {
                 let kind = &"Identifier";
-                self.lookup(s, kind, line)
+                self.lookup_at(expr.id, s, kind, line)
             }
             ExprKind::Leaf(l) => return Ok(Referenceable::Value(Value::from(l))),
             ExprKind::Grouping(b) => return self.evaluate_expr(b.as_ref(), line),
