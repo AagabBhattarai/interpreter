@@ -1,7 +1,8 @@
 use crate::error::ParseError;
+use crate::expression::{Expr, ExprBuilder, ExprKind};
 use crate::scanner::{Literal, Token, TokenType};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Leaf {
     Text(String),
     Number(f64),
@@ -35,7 +36,7 @@ impl From<Literal> for Leaf {
         }
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnaryOp {
     Not,
     Negation,
@@ -57,7 +58,7 @@ impl From<TokenType> for UnaryOp {
         }
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinaryOp {
     Divide,
     Multiply,
@@ -104,7 +105,7 @@ impl From<TokenType> for BinaryOp {
         }
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogicalOp {
     And,
     Or,
@@ -124,40 +125,6 @@ impl std::fmt::Display for LogicalOp {
         match self {
             LogicalOp::And => write!(f, "and"),
             LogicalOp::Or => write!(f, "or"),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum Expr {
-    Leaf(Leaf), // literal values
-    Grouping(Box<Expr>),
-    Unary(UnaryOp, Box<Expr>),
-    Binary(Box<Expr>, BinaryOp, Box<Expr>),
-    Assignment(String, Box<Expr>),
-    Logical(Box<Expr>, LogicalOp, Box<Expr>),
-    Call(Box<Expr>, Vec<Expr>),
-}
-
-impl std::fmt::Display for Expr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Expr::Leaf(l) => write!(f, "{}", l),
-            Expr::Grouping(e) => write!(f, "(group {})", *e),
-            Expr::Unary(op, right) => write!(f, "({} {})", op, *right),
-            Expr::Binary(left, op, right) => write!(f, "({1} {0} {2})", left, op, right),
-            Expr::Assignment(l, r) => write!(f, "(= {} {})", l, r), // _ => todo!(),
-            Expr::Logical(left, op, right) => write!(f, "({1} {0} {2})", left, op, right),
-            Expr::Call(func, args) => {
-                let mut argument_string = String::new();
-                let add_args = |e: &Expr| {
-                    argument_string.push_str(format!("{},", e).as_str());
-                };
-                args.iter().for_each(add_args);
-                argument_string.pop();
-
-                write!(f, "({}({}))", func, argument_string)
-            }
         }
     }
 }
@@ -207,10 +174,15 @@ pub enum Statement {
 pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
+    expr_builder: ExprBuilder,
 }
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, current: 0 }
+        Self {
+            tokens,
+            current: 0,
+            expr_builder: ExprBuilder::new(),
+        }
     }
     pub fn parse_program(&mut self) -> Result<Vec<Declaration>, ParseError> {
         let mut statements = Vec::new();
@@ -221,6 +193,7 @@ impl Parser {
     }
     pub fn declarations(&mut self) -> Result<Declaration, ParseError> {
         let line = self.get_line_number();
+
         if self.is_expected_token(TokenType::VAR) {
             return self.var_declaration(line);
         }
@@ -275,7 +248,7 @@ impl Parser {
         let expr = if self.is_expected_token(TokenType::EQUAL) {
             self.expression()?
         } else {
-            Expr::Leaf(Leaf::Nil)
+            self.expr_builder.leaf(Leaf::Nil)
         };
         self.check_end_of_statement(line)?;
         Ok(Declaration::Var { name, expr, line })
@@ -283,6 +256,7 @@ impl Parser {
 
     fn statement(&mut self) -> Result<Statement, ParseError> {
         let line = self.get_line_number();
+
         if self.is_expected_token(TokenType::PRINT) {
             return self.print_statement(line);
         }
@@ -309,7 +283,7 @@ impl Parser {
         let expr = if !self.check(TokenType::SEMICOLON) {
             self.expression()?
         } else {
-            Expr::Leaf(Leaf::Nil)
+            self.expr_builder.leaf(Leaf::Nil)
         };
         self.consume(
             TokenType::SEMICOLON,
@@ -332,11 +306,10 @@ impl Parser {
         };
 
         let condition = if self.check(TokenType::SEMICOLON) {
-            Expr::Leaf(Leaf::Boolean(true))
+            self.expr_builder.leaf(Leaf::Boolean(true))
         } else {
             self.expression()?
         };
-
         self.consume(TokenType::SEMICOLON, &error_msg(';'))?;
 
         let increment = if self.check(TokenType::RIGHT_PAREN) {
@@ -344,7 +317,6 @@ impl Parser {
         } else {
             Some(self.expression()?)
         };
-
         self.consume(TokenType::RIGHT_PAREN, &error_msg(')'))?;
 
         let body = self.statement()?;
@@ -382,6 +354,7 @@ impl Parser {
         self.consume(TokenType::LEFT_PAREN, &error_msg('('))?;
         let expr = self.expression()?;
         self.consume(TokenType::RIGHT_PAREN, &error_msg(')'))?;
+
         let block = Box::new(self.statement()?);
 
         Ok(Statement::While { expr, block, line })
@@ -389,6 +362,7 @@ impl Parser {
 
     fn conditional_statement(&mut self, line: usize) -> Result<Statement, ParseError> {
         let error_msg = |c: char| format!("Expected '{c}' in the 'if'");
+
         self.consume(TokenType::LEFT_PAREN, &error_msg('('))?;
         let expr = self.expression()?;
         self.consume(TokenType::RIGHT_PAREN, &error_msg(')'))?;
@@ -444,8 +418,9 @@ impl Parser {
             let value = self.assignment()?;
 
             // I can't evaluate it yet, but i have a inkling that placing identifier at leaf will require refactor # FOR NOW LET'S move forward.
-            if let Expr::Leaf(Leaf::Identifier(lvalue)) = expr {
-                return Ok(Expr::Assignment(lvalue, Box::new(value)));
+            // Need to have assignment for field acess too.
+            if let ExprKind::Leaf(Leaf::Identifier(lvalue)) = expr.data {
+                return Ok(self.expr_builder.assignment(lvalue, value));
             } else {
                 // Again error reporting mechanism isn't standard, that is why i am having a hard time getting the line number value
                 let line = self.get_line_number();
@@ -460,7 +435,7 @@ impl Parser {
         while self.is_expected_token(TokenType::OR) {
             let op = LogicalOp::from(self.previous());
             let right = self.logical_and()?;
-            left = Expr::Logical(Box::new(left), op, Box::new(right));
+            left = self.expr_builder.logical(left, op, right);
         }
         Ok(left)
     }
@@ -470,7 +445,7 @@ impl Parser {
         while self.is_expected_token(TokenType::AND) {
             let op = LogicalOp::from(self.previous());
             let right = self.equality()?;
-            left = Expr::Logical(Box::new(left), op, Box::new(right));
+            left = self.expr_builder.logical(left, op, right);
         }
         Ok(left)
     }
@@ -481,7 +456,7 @@ impl Parser {
         {
             let operator = BinaryOp::from(self.previous());
             let right_operand = self.comparison()?;
-            expr = Expr::Binary(Box::new(expr), operator, Box::new(right_operand));
+            expr = self.expr_builder.binary(expr, operator, right_operand);
         }
         Ok(expr)
     }
@@ -494,7 +469,7 @@ impl Parser {
         {
             let operator = BinaryOp::from(self.previous());
             let right_operand = self.term()?;
-            expr = Expr::Binary(Box::new(expr), operator, Box::new(right_operand));
+            expr = self.expr_builder.binary(expr, operator, right_operand);
         }
         Ok(expr)
     }
@@ -503,7 +478,7 @@ impl Parser {
         while self.is_expected_token(TokenType::PLUS) || self.is_expected_token(TokenType::MINUS) {
             let operator = BinaryOp::from(self.previous());
             let right_operand = self.factor()?;
-            expr = Expr::Binary(Box::new(expr), operator, Box::new(right_operand));
+            expr = self.expr_builder.binary(expr, operator, right_operand);
         }
         Ok(expr)
     }
@@ -512,16 +487,17 @@ impl Parser {
         while self.is_expected_token(TokenType::SLASH) || self.is_expected_token(TokenType::STAR) {
             let operator = BinaryOp::from(self.previous());
             let right_operand = self.unary()?;
-            expr = Expr::Binary(Box::new(expr), operator, Box::new(right_operand));
+            expr = self.expr_builder.binary(expr, operator, right_operand);
         }
         Ok(expr)
     }
     fn unary(&mut self) -> Result<Expr, ParseError> {
         if self.is_expected_token(TokenType::BANG) || self.is_expected_token(TokenType::MINUS) {
-            Ok(Expr::Unary(
-                UnaryOp::from(self.previous()),
-                Box::new(self.unary()?),
-            ))
+            // Ok(Expr::Unary(
+            let expr = self.unary()?;
+            Ok(self
+                .expr_builder
+                .unary(UnaryOp::from(self.previous()), expr))
         } else {
             self.call()
         }
@@ -551,27 +527,27 @@ impl Parser {
         }
 
         self.consume(TokenType::RIGHT_PAREN, "Expected a closing ')' in the call")?;
-        Ok(Expr::Call(Box::new(callee), args))
+        Ok(self.expr_builder.call(callee, args))
     }
     //This is such a bad design
     fn primary(&mut self) -> Result<Expr, ParseError> {
         if self.is_expected_token(TokenType::TRUE) {
-            return Ok(Expr::Leaf(Leaf::Boolean(true)));
+            return Ok(self.expr_builder.leaf(Leaf::Boolean(true)));
         } else if self.is_expected_token(TokenType::FALSE) {
-            return Ok(Expr::Leaf(Leaf::Boolean(false)));
+            return Ok(self.expr_builder.leaf(Leaf::Boolean(false)));
         } else if self.is_expected_token(TokenType::NIL) {
-            return Ok(Expr::Leaf(Leaf::Nil));
+            return Ok(self.expr_builder.leaf(Leaf::Nil));
         } else if self.is_expected_token(TokenType::NUMBER)
             || self.is_expected_token(TokenType::STRING)
         {
             let leaf_literal = self.get_token_literal();
-            return Ok(Expr::Leaf(Leaf::from(leaf_literal)));
+            return Ok(self.expr_builder.leaf(Leaf::from(leaf_literal)));
         } else if self.is_expected_token(TokenType::LEFT_PAREN) {
-            let expr = Box::new(self.expression()?);
+            let expr = self.expression()?;
             self.consume(TokenType::RIGHT_PAREN, "Expected ')' after expression")?;
-            return Ok(Expr::Grouping(expr));
+            return Ok(self.expr_builder.grouping(expr));
         } else if self.is_expected_token(TokenType::IDENTIFIER) {
-            return Ok(Expr::Leaf(Leaf::Identifier(self.get_lexeme())));
+            return Ok(self.expr_builder.leaf(Leaf::Identifier(self.get_lexeme())));
         } else {
             if self.at_end_of_stream() {
                 let error_msg = format!("Error: Reached the end of the file.");

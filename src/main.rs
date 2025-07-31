@@ -1,15 +1,18 @@
 #![allow(unreachable_patterns, dead_code)]
 
+mod environment;
 mod error;
 mod evaluate;
+mod expression;
 mod native_function;
 mod parser;
+mod resolver;
 mod scanner;
-mod environment;
 
 use error::{EvalError, ParseError};
 use evaluate::Evaluator;
-use parser::{Declaration, Expr, Parser};
+use expression::Expr;
+use parser::{Declaration, Parser};
 use scanner::Scanner;
 
 use std::env;
@@ -76,7 +79,7 @@ fn main() -> ExitCode {
         },
         "run" => match scan_and_parse_statements(filename) {
             Ok(statements) => {
-                // println!("{:?}", statements);
+                println!("{:#?}", statements);
                 let mut evaluator = Evaluator::new();
                 match evaluator.evaluate(&statements) {
                     Ok(_) => return ExitCode::from(0),
@@ -97,7 +100,7 @@ fn main() -> ExitCode {
                         eprintln!("{}", msg);
                         return ExitCode::from(code);
                     }
-                    _ => panic!("Only return value is not included here")
+                    _ => panic!("Only return value is not included here"),
                 }
             }
             Err((msg, code)) => {

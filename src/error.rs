@@ -18,6 +18,16 @@ impl ParseError {
         ParseError::ExpectedToken(msg, exit_code)
     }
 }
+#[derive(Debug)]
+pub enum ResolutionError{
+    ReDeclaration(String, u8),
+}
+impl ResolutionError {
+    pub fn re_declaration(msg: String) -> ResolutionError {
+        let exit_code = 67;
+        ResolutionError::ReDeclaration(msg, exit_code) 
+    }
+}
 
 #[derive(Debug)]
 pub enum EvalError {

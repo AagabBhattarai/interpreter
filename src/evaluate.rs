@@ -3,13 +3,8 @@ use std::mem::swap;
 use std::rc::Rc;
 
 use crate::error::EvalError;
-use crate::parser::BinaryOp;
-use crate::parser::Declaration;
-use crate::parser::Expr;
-use crate::parser::Leaf;
-use crate::parser::LogicalOp;
-use crate::parser::Statement;
-use crate::parser::UnaryOp;
+use crate::expression::{Expr, ExprId, ExprKind};
+use crate::parser::{BinaryOp, Declaration, Leaf, LogicalOp, Statement, UnaryOp};
 // BOTH Value and leaf enum are same don't repeat things??? Refactor fast but later
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -132,9 +127,9 @@ pub enum Referenceable {
     ),
 }
 
-    // pub struct Evaluator {
-    //     pub environment: Vec<ReferenceTable>,
-    // }
+// pub struct Evaluator {
+//     pub environment: Vec<ReferenceTable>,
+// }
 use crate::environment::*;
 pub struct Evaluator {
     pub current_environment: Pointer,
@@ -217,12 +212,15 @@ impl Evaluator {
                                 name
                             )))
                         }
-                    };  
+                    };
                     let params = parameters
                         .iter()
                         .map(|p| match p {
                             Leaf::Identifier(s) => Ok(s.clone()),
-                            _ => Err(EvalError::not_callable(format!("{} is not a valid parameter to fun {}", p, name))),
+                            _ => Err(EvalError::not_callable(format!(
+                                "{} is not a valid parameter to fun {}",
+                                p, name
+                            ))),
                         })
                         .collect::<Result<Vec<String>, EvalError>>()?;
 
@@ -304,20 +302,20 @@ impl Evaluator {
 
     pub fn evaluate_expr(&mut self, expr: &Expr, line: usize) -> Result<Referenceable, EvalError> {
         // println!("{:?}", expr);
-        match expr {
-            Expr::Assignment(identifier, value) => {
+        match &expr.data {
+            ExprKind::Assignment(identifier, value) => {
                 let value = self.evaluate_expr(value.as_ref(), line)?;
                 let kind = &"variable";
                 self.update(identifier, value, kind, line)?;
                 self.lookup(&identifier, kind, line) // print a=10; prints 10 because assignment returns value
             }
-            Expr::Leaf(Leaf::Identifier(s)) => {
+            ExprKind::Leaf(Leaf::Identifier(s)) => {
                 let kind = &"Identifier";
                 self.lookup(s, kind, line)
             }
-            Expr::Leaf(l) => return Ok(Referenceable::Value(Value::from(l))),
-            Expr::Grouping(b) => return self.evaluate_expr(b.as_ref(), line),
-            Expr::Unary(operator, operand) => {
+            ExprKind::Leaf(l) => return Ok(Referenceable::Value(Value::from(l))),
+            ExprKind::Grouping(b) => return self.evaluate_expr(b.as_ref(), line),
+            ExprKind::Unary(operator, operand) => {
                 let sub_expr_value = self.evaluate_expr(operand.as_ref(), line)?;
                 match operator {
                     UnaryOp::Negation => {
@@ -336,7 +334,7 @@ impl Evaluator {
                     }
                 }
             }
-            Expr::Binary(left, operator, right) => {
+            ExprKind::Binary(left, operator, right) => {
                 let left = self.evaluate_expr(left.as_ref(), line)?;
                 let right = self.evaluate_expr(right.as_ref(), line)?;
 
@@ -429,7 +427,7 @@ impl Evaluator {
                     }
                 }
             }
-            Expr::Logical(left, op, right) => {
+            ExprKind::Logical(left, op, right) => {
                 let left = self.evaluate_expr(left.as_ref(), line)?;
 
                 match op {
@@ -450,7 +448,7 @@ impl Evaluator {
                 }
                 self.evaluate_expr(right.as_ref(), line)
             }
-            Expr::Call(callee, arguments) => {
+            ExprKind::Call(callee, arguments) => {
                 let callee = self.evaluate_expr(callee.as_ref(), line)?;
 
                 // redundant? but for specific test case this check is present
